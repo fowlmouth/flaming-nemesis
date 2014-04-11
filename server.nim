@@ -1,6 +1,7 @@
 import 
   enetcon, packets, pkt_tools,
-  tables, strutils
+  connection_common,
+  tables, strutils, fowltek/idgen
 
 
 const
@@ -18,10 +19,15 @@ type
     peer*: RPeer
 
   PServer* = ref object
-    users*: seq[PUser]
- 
+    ut*: UserTable
+
+proc srv * (con: PConnection): PServer =
+  cast[PServer](con.data)
+
 var 
-  srv: PConnection
+  host: PConnection
+
+
   userList = TUserList(users: @[])
   name2user = initTable[string, int](64)
 
@@ -41,6 +47,7 @@ import algorithm
 proc `<`* (a,b:TUser):bool = a.id < b.id
 
 var vt = defaultVT
+
 vt.onConnect = proc(C:PConnection; client:int) = 
   when defined(Debug):
     echo "Client ",client," connected from ", c[client].ip
@@ -94,13 +101,20 @@ defPkt(vt,pktLogin):
   con.handleLogin origin, L
 
 vt.onDisconnect = proc(C:PConnection; client:int) =
-  echo "user ", client, " disconnected."
+  let srv = c.srv
+  var pkt = initOpkt(8)
+  pkt << TDisconnect(user: client.TUserID)
+  c.broadcast pkt, channel0, flagReliable
+  
+  srv.ut.users[client].reset
 
-srv = newConnection(vt)
+host = newConnection(vt)
+host.data = cast[pointer](PServer(ut: initUsertable()))
+
 
 echo "Starting server on port ", port
-srv.hostServer port.int16
+host.hostServer port.int16
 
 while true:
-  srv.update
+  host.update
 

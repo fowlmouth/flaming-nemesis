@@ -15,12 +15,16 @@ type
     elif defined(useAllegro):
       queue*: PEventQueue
       display*:PDisplay
+      keyDown*: array[keyMax, bool]
 
   GS_VT* = object
-    init* : proc(gs: var GameState; ds:drawState)
+    init* : proc(gs: var GameState; m: GSM)
     handleEvent*: proc(GS: GameState; evt: backend.PEvent): bool
     update*: proc(GS: GameState; DT:Float)
     draw*: proc(GS: GameState; ds: drawState) 
+    
+    enter*, leave*: proc(GS:GameState)
+
 
 proc window_width* (G:GSM): int =
   when defined(useCSFML):
@@ -41,20 +45,9 @@ proc getDrawState* (G:GSM): DrawState =
     drawState(d: g.display)
 
 var defaultGS*: GS_VT
-defaultGS.init = proc(gs: var GameState; ds:drawState) =
+defaultGS.init = proc(gs: var GameState; M: GSM) =
   gs = gameState()
 
-defaultGS.handleEvent = proc(gs:GameState; evt: backend.PEvent): bool =
-  when defined(useCSFML):
-    if evt.kind == evtClosed:
-      gs.manager.window.close
-      gs.manager.running = false
-      return true
-      
-  elif defined(useAllegro):
-    if evt.kind == eventDisplayClose:
-      gs.manager.running = false
-      return true
 
 defaultGS.update = proc(gs:gamestate; dt:float)=
   discard
@@ -62,20 +55,51 @@ defaultGS.draw = proc(gs:gamestate; ds: DrawState) =
   discard
 
 proc newGS* (m: GSM; vt: var gs_vt): gamestate =
-  vt.init(result, m.getDrawState)
+  vt.init(result, m)
+  result.m = m
   result.vt = vt.addr
 
 proc topGS* (M:GSM):GameState = m.states[< m.states.len]
-proc push* (M:GSM; gs: var gs_vt) =
-  let state = m.newGS(gs)
-  m.states.add state
+
+proc add_state (M:GSM; state: GameState) =
+  if m.states.len > 0:
+    # .leave the current state
+    if not m.topGS.vt.leave.isNil:
+      m.topGS.vt.leave( m.topGS )
+  
   state.m = m
+  m.states.add state
+
+  if not state.vt.enter.isNil:
+    state.vt.enter( state )
+    
+
+proc push* (M:GSM; gs: var gs_vt) =
+  m.add_state m.newGS(gs)
+  
 proc push* (M:GSM; gs: GameState) =
-  m.states.add gs
-  gs.m = m
+  m.add_state gs
 
 proc pop* (M: GSM) = 
-  discard m.states.pop
+  let s = m.states.pop
+  if not s.vt.leave.isNil:
+    s.vt.leave( s )
+  if m.states.len == 0:
+    m.running = false
+
+
+template quit_event_check* (evt; body:stmt):stmt {.immediate.}=
+  when defined(useAllegro):
+   if evt.kind == eventDisplayClose:
+    body
+  elif defined(useCSFML):
+   if evt.kind == evtQuit:
+    body
+
+defaultGS.handleEvent = proc(gs:GameState; evt: backend.PEvent): bool =
+  quit_event_check(evt):
+    gs.manager.pop
+
 
 proc newGSM* (w,h:int; title:string): GSM =
   when defined(useCSFML):
@@ -98,6 +122,8 @@ proc newGSM* (w,h:int; title:string): GSM =
     q.register result.display.eventSource()
     
     result.queue = q 
+    
+    initColors()
   
   result.states.newSeq 0
 
@@ -123,7 +149,7 @@ proc run* (M: GSM) =
         m.window.display
 
   elif defined(useAllegro):
-    discard al.run_main(0, cast[cstringarray](m), proc(argc:cint, argv:cstringarray):cint{.cdecl.} =
+    discard al.run_main(0, cast[cstringarray](m)) do (argc:cint, argv:cstringarray)->cint{.cdecl.}:
       let m = cast[GSM](argv) 
       var
         last = getTime()
@@ -135,6 +161,8 @@ proc run* (M: GSM) =
       
       while m.running:
         m.queue.waitForEvent(evt)
+        if evt.kind == eventKeyDown: m.keyDown[evt.keyboard.keycode] = true
+        elif evt.kind == eventKeyUp: m.keyDown[evt.keyboard.keycode] = false
         if m.topGS.vt.handleEvent(m.topGS, evt):
           continue
         
@@ -152,7 +180,7 @@ proc run* (M: GSM) =
             flipDisplay()
 
       drawTimer.stop
-    )
+    
 
 when defined(useAllegro):
   al.init()
