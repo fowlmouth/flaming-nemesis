@@ -124,7 +124,9 @@ proc importChatlog* (J:PJsonNode; s:importstate): PWidget =
 
 template zz (ty; importF): expr =
   just(TValidator(
-    typeChecker: (proc(W:PWidget):bool= w is ty),
+    typeChecker: (proc(W:PWidget):bool= 
+      result = w is ty
+      echo "result of typeChecker: ", result),
     importer: importF
   ))
 

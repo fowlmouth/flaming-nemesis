@@ -1,7 +1,7 @@
 
 import 
   backend, lobby,
-  gamestates
+  gamestates, json, gui_json
 import_backends
 
 
@@ -20,25 +20,28 @@ gs.init = proc(gs:var gamestate; m:gsm) =
     "font":  %{
       "regular": %{"file": %"Vera.ttf", "size": %14}
     },
-    "style": %{
-      %[%{"type":"textlabel"}, %{"font":"regular"}]
-    },
+    "style": %[
+      %[%{"type": %"textlabel"}, %{"font": %"regular"}]
+    ],
     "root": %{
       "type": %"container",
       "widgets": %[
-        %{"type": %"textlabel", "text":"Hello"}
+        %{"type": %"textlabel", "text": %"Hello"}
       ]
     }
-  }).importGui m.window_width, m.window_height
+  }).importGui(m.window_width.float, m.window_height.float, defaultController)
   res.gui = gui.root
   
   gs = res
   
 gs.draw = proc(gs:gamestate; ds:drawstate) =
-  gs.gui.draw
+  baseGS.draw gs, ds
+  gs.pgs.gui.draw
 
 
 gs.handleEvent = proc(gs:gamestate; evt:backend.PEvent): bool =
+  if baseGS.handleEvent( gs, evt ): return true
+  
   quit_event_check(evt):
     gs.manager.pop
     return true
