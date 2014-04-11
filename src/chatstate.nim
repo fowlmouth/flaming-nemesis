@@ -4,130 +4,143 @@
 #  fowltek/maybe_t
 import
   signals, 
-  gamestates, backend,
+  gamestates, backend, gui_json,
   basic2d, strutils, tables, os, math,
   fowltek/maybe_t
 import_backends
+export gui_json
 
 import enetcon, packets, connection_common
 
 type
-  PChatState* = ref object of GameState
-    client: PConnection
-    ut: UserTable
-    networkTimer: PTimer
-  
-    gui: TGuiIndex
-    loginForm, userList, chatArea: PWidget
-    chatWindow: PChatlog
-    showLogin: bool
+  PChatState* = ref object of TObject
+    client*: PConnection
+    ut*: UserTable
+    gui*: TGuiIndex
+    loginForm*, userList, chatArea*, sidepane: PWidget
+    chatlog*: PChatLog
+    showOpts*: bool
+    opts*: PWidget
+
 var
   vt = packets.defaultVT
 
-proc connect (gs: PChatState; ip:string; port:int; timeout:float): bool =
+proc connect (cs: PChatState; ip:string; port:int; timeout:float): bool =
   try:
     let c = newConnection(vt)
+    c.data = cast[pointer](cs)
     c.connectClient ip,port.int16, timeout
-    gs.client = c
+    cs.client = c
     return true
   except:
     echo "Failed to connect: ", getCurrentExceptionMsg()
     return false
 
-proc submitLogin (GS:PChatState) =
-  if gs.client.isNil: return
-  
-  let name = gs.gui.index["user"].PTextLabel.text
-  if name.isNil or name.len == 0: return
-  
-  var loginpkt = initOpkt(32)
-  var login = TLogin(name: name)
-  loginpkt << login
-  gs.client.broadcast loginpkt, channel0, flagReliable
-  
-proc submitChat (GS:PChatState; text:string) =
-  if gs.client.isNil: return
-  
-  var pkt = initOpkt(256)
-  pkt << packets.TChat(msg: text)
-  gs.client.broadcast pkt, channel0, 0
-
-
-var 
-  chatstateGS* = defaultGS
-
-chatstateGS.init = proc(gs:var gamestate; ds:drawstate ) =
-  var res: PChatState
-  new res
-  res.client = newConnection(vt)
-  res.client.data = cast[pointer](res)
-  res.ut = initUsertable()
-  res.networkTimer = createTimer(1/60)
-  
-  res.gui = importGUI("gui.json", ds.d.getDisplayWidth.float, ds.d.getDisplayHeight.float)
-  res.loginForm = res.gui.index["loginform"]
-  res.userlist = res.gui.index["userlist"]
-  res.chatArea = res.gui.index["chatarea"]
-  res.chatWindow = res.gui.index["chat"].PChatLog
-
-  res.gui.index["submit-login"].onClick.connect res, submitLogin
-  res.gui.index["chatinput"].PInputfield.textEntered.connect res, submitChat
-
-  discard res.connect( "localhost",8024, 1.0 
-  gs = res
-
-chatstateGS.draw = proc(gs:gamestate; ds:drawState) =
-  let gs = gs.PChatState
-  #gui
-  gs.chatarea.draw
-  #chatarea.drawbb
-  gs.gui.index["chatinput"].drawbb
-  
-  gs.userlist.draw
-  
-  
-  if gs.showLogin:
-    gs.loginForm.draw
-    gs.loginform.drawbb
-
-chatstateGS.handleEvent = proc(gs:GameState; evt:backend.PEvent): bool =
-  if gs.PChatstate.gui.root.handleEvent(evt): return true
-  
-  when defined(useCSFML): 
-    case evt.kind
-    of evtClosed:
-      gs.manager.window.close
-      gs.manager.running = false
-      return true
-    else:
-      discard
-  elif defined(useAllegro):
-    case evt.kind
-    of eventDisplayClose:
-      gs.manager.running = false
-      return true
-    else:
-      discard
-
-proc gs (c: PConnection): PChatstate =
-  cast[PObject](c.data).PChatState
-
-var
-  client:PConnection
-
 const
-  my_name = "foo"
   address = ("localhost",8024)
 
-vt.onConnect = proc(C:PConnection; clientID:int) =
-  echo "Connected as client ", clientID
+proc toggle* (b:var bool){.inline.} = b = not b
+
+proc cShowLoginForm (cs:PChatState): proc =
+  return proc =
+    cs.loginForm.toggleHidden
+
+proc cPopState (man:GSM): proc  =
+  return proc =
+    man.pop
+
+proc cSubmitLogin (cs:PChatState): proc =
+  return proc =
+    echo "cSubmitLogin()"
+    if cs.client.isNil: 
+      echo "client is nil"
+      return
+    
+    let name = cs.gui.index["user"].PTextLabel.text
+    if name.isNil or name.len == 0: return
+    
+    var loginpkt = initOpkt(32)
+    var login = TLogin(name: name)
+    loginpkt << login
+    cs.client.broadcast loginpkt, channel0, flagReliable
+
+proc cSubmitChat (cs:PChatState): proc(text:string) =
+  return proc(text:string) =
+    if cs.client.isNil: return
+    
+    var pkt = initOpkt(256)
+    pkt << packets.TChat(msg: text) #cs.gui.index["chatinput"].PInputfield.text)
+    cs.client.broadcast pkt, channel0, 0
+
+proc cReconnect (cs:PChatState): proc() =
+  return proc =
+    if not cs.connect( address[0],address[1], 0.1 ):
+      cs.chatLog.add "Failed to connect to $#:$#".format(address[0],address[1]), green
+proc cToggleOverlay (cs:PChatstate):proc()=
+  return proc =
+    let child = cs.opts.pcontainer.ws[1]
+    if child.state == widgetHidden:
+      cs.chatarea.show
+      cs.userlist.show
+      cs.sidepane.show
+      child.show
+    elif child.state == widgetActive:
+      cs.chatarea.hide
+      cs.userlist.hide
+      cs.sidepane.hide
+      child.hide
+
+proc newChatstate* (man:GSM; file: string; w,h: float): PChatstate =
+  var res: PChatState
+  new res
+  res.ut = initUsertable()
+  res.showOpts = true
   
-  discard """ # try to login
-  var L: TLogin
-  var o = initOpkt(32)
-  L.name = my_name
-  o << L
-  c.broadcast o, channel0, flagReliable """
+  var controllers = widgetControllers(
+    onclick = {
+      "ShowLoginForm":cShowLoginForm(res), 
+      "Quit":cPopState(man), 
+      "SubmitLogin":cSubmitLogin(res),
+      "Reconnect":cReconnect(res),
+      "ToggleOverlay":cToggleOverlay(res),
+    },
+    textEntered = {
+      "SubmitChat":cSubmitChat(res)
+    }
+  )
+  
+  res.gui = importGUI(file, w,h, controllers)
+  res.loginForm = res.gui.index["loginform"]
+  res.userList = res.gui.index["userlist"]
+  res.chatArea = res.gui.index["chatarea"]
+  res.chatLog = res.gui.index["chat"].PChatlog
+  res.opts = res.gui.index["opts"]
+  res.sidepane = res.gui.index["sidepane"]
+
+  #res.gui.index["submit-login"].onClick.connect res, submitLogin
+  #res.gui.index["chatinput"].PInputfield.textEntered.connect res, submitChat
+  cReconnect(res)()
+  discard """ if not res.connect( address[0],address[1], 0.1 ):
+    res.chatLog.add "Failed to connect to $#:$#".format(address[0],address[1]), green """
+  
+  res
+
+proc draw* (cs:PChatState; ds:DrawState) =
+  cs.gui.root.draw
+
+
+proc handleEvent* (CS:PChatState; event: backend.PEvent): bool =
+  result = cs.gui.dispatch(event)
+proc dispatch* (cs:PChatState; event:backend.PEvent): bool =
+  result = cs.gui.dispatch(event)
+## base network 
+## the last packet should be used for game-specific packets  
+
+proc cs (c: PConnection): PChatstate =
+  cast[PChatState](c.data)
+
+vt.onConnect = proc(C:PConnection; clientID:int) =
+  c.cs.chatLog.add("Connected as client $#" % $clientID, green)
 
 defPkt(vt, pktChat):
   var c: packets.TChat
@@ -138,14 +151,16 @@ defPkt(vt, pktChat):
     msg: string
   if c.user == -1:
     swap msg, c.msg
+    color = green
   else: 
-    let user = con.gs.ut.find(c.user)
+    let user = con.cs.ut.find(c.user)
     if user.has:
       msg = "<$1> $2".format(user.val.name, c.msg)
     else:
       msg = "[$1] $2".format(c.user, c.msg)
-  con.gs.chatWindow.add(msg,color)
-  echo msg
+  con.cs.chatLog.add(msg,color)
+  when defined(DEBUG):
+    echo msg
 
 proc `$`* [T] (some:seq[T]): string =
   result = "["
@@ -158,97 +173,8 @@ proc `$`* [T] (some:seq[T]): string =
 defPkt(vt, pktUserList):
   var c: packets.TUserList
   pkt >> c
-  let gs = con.gs
+  let cs = con.cs
   for u in c.users.mitems:
-    gs.ut.save u
+    cs.ut.save u
 
-
-discard """ let white = mapRGB(255,255,255)
-
-proc addChat* (text:string; color = white) =
-  logWidget.add text,color
-
-import al/cam
-
-  D = createDisplay(800,640)
-  let
-    drawTimer = createTimer(1/60)
-    networkTimer = createTimer(2/60)
-    q = createEventQueue()
-    cam = newCamera(D)
-  cam.center = point2d(800/2,640/0)
-  
-  let
-    white = mapRGB(255,255,255)
-    
-  drawTimer.start
-  
-  template screen_height: expr = d.getDisplayHeight
-  template screen_width: expr = d.getDisplayWidth
-  
-  q.register d.eventSource
-  q.register drawTimer.eventSource
-  q.register getKeyboardEventSource()
-  q.register getMouseEventSource()
-  
-  setup_gui d
-  addChat "hello", white
-  addChat "there", white
-  
-  if connect(address[0],address[1], timeout = 1.0):
-    networkTimer.start
-
-  var 
-    evt: al.TEvent
-    last = al.getTime()
-    
-    showLogin = true
-  #  loginForm = {"user":"foo"}.toTable
-  
-  template redraw: stmt =
-    let
-      cur = al.getTime()
-      dt = cur - last
-    last = cur
-    
-    #if drawTimer.count mod 500 == 0: cam.zoom 0.99
-    #cam.use
-    
-    cleartocolor maprgb(0,0,0)
-    
-    
-    flipDisplay()
-  
-  while true:
-    q.waitForEvent evt
-    if gui.root.handleEvent(evt): continue
-    
-    case evt.kind
-    of EventTimer:
-      if evt.timer.source == drawTimer.eventSource:
-        redraw
-      elif evt.timer.source == networkTimer.eventSource:
-        client.update
-      
-    of eventKeyChar:
-    
-      if evt.keyboard.unichar in 32 .. 126:
-        #inputHandle evt.keyboard.unichar.char
-
-    of eventDisplayClose:
-    
-      break
-
-    of eventKeyDown:
-    
-      case evt.keyboard.keycode
-      of keyEscape:
-        break
-        
-      else:
-        discard
-    else:
-      discard
-
- """
 

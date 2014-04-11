@@ -110,7 +110,7 @@ defPkt(defaultVT, pktLogin):
 
 type
   TDisconnect* = object
-    user: TUserID
+    user*: TUserID
 proc `>>`* (L:PPacket; R:var TDisconnect) =
   L >> r.user
 proc `<<`* (L:var Opkt; R:TDisconnect)=
@@ -120,6 +120,8 @@ defPkt(defaultVT, pktDisconnect):
   var d: TDisconnect
   pkt >> d
   echo "User ", d.user, " disconnected."
+
+
 
 
 

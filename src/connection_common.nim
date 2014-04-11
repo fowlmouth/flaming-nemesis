@@ -11,6 +11,7 @@ proc save* (ut:var usertable; user:TUser) =
   ut.name2user[user.name] = user.id
 
 proc find* (ut:var userTable; user: TInteger): TMaybe[ptr TUser] =
+  # get a temporary pointer to the TUser record
   let user = user.int
   if user in 0 .. len(ut.users)-1 and not ut.users[user].name.isNil:
     result = just(ut.users[user].addr)

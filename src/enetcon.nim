@@ -160,12 +160,13 @@ proc handleConnection (C:PConnection; P:PPeer) =
   # run onConnect callbac
   if not c.vt.onConnect.isNil:
     c.vt.onConnect(c, id)
-      
-proc update* (C:PConnection) =
+
+proc update* (C:PConnection; iterations = 100) =
+  if c.isNil: return
+
   var 
     evt: TEvent
-
-  for i in 0 .. < 100:
+  for i in 1 .. iterations:
     if c.host.hostService(evt, 1) < 1:
       break
     
@@ -185,7 +186,9 @@ proc update* (C:PConnection) =
           #
           if not c.vt.onDisconnect.isNIL:
             c.vt.onDisconnect c,peer.id
-
+          c.peerID.release peer.id
+          c.peers[peer.id] = nil
+      
       of conClient:
         #
       
