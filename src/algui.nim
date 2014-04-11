@@ -1,10 +1,11 @@
 import
-  math, os, strutils, tables, basic2d,
-  al, 
+  math, os, strutils, tables, basic2d, unsigned,
+  backend,
   signals,
   fowltek/maybe_t, fowltek/boundingbox
+import_backends
 
-proc find_file (f: string; dirs: varargs[string]): seq[string] = 
+proc find_file* (f: string; dirs: varargs[string]): seq[string] = 
   newSeq result,0
   for d in dirs:
     for file in walkFiles(d/f):
@@ -23,9 +24,7 @@ proc expandToInclude* (bb:var TBB; bb2:TBB) =
   bb.t = min(bb.t, bb2.t)
   bb.r = max(bb.r, bb2.r)
   bb.b = max(bb.b, bb2.b)
-proc contains* (bb:TBB; point:TPoint2d): bool=
-  point.x >= bb.l and point.x <= bb.r and
-    point.y>=bb.t and point.y <= bb.b
+
 
 proc width*(BB:TBB):float{.inline.}=bb.r - bb.l
 proc w* (BB:TBB):float {.inline.} = bb.r - bb.l
@@ -37,7 +36,10 @@ proc `h=`*(bb:var TBB; h:float) {.inline.}=
   bb.b = bb.t + h """
 proc center*(BB:TBB): TPoint2d {.inline.} =
   point2d( bb.left + bb.width / 2.0 , bb.top + bb.height / 2.0 )
-
+proc contains* (bb:TBB; point:TPoint2d): bool=
+  point.x >= bb.left and point.x <= bb.right and
+    point.y>=bb.top and point.y <= bb.bottom
+    
 type RFont* = ref object
   f*: PFont
 proc fontR* (f:PFont): RFont =
@@ -49,23 +51,31 @@ type
   TStyle* = object
     font*: RFont
     fontColor*: TColor
-    paddingRight*,paddingBottom*:float
+    paddingLeft*,paddingRight*,paddingBottom*:float
+    minimumWidth*:float
 
 type
   TWidgetVT* = object
     draw*: proc(W:PWidget){.nimcall.}
+    getPos*: proc(W:PWidget): TPoint2d{.nimcall.}
     setPos*: proc(W:PWidget; pos:TPoint2d){.nimcall.}
     getBB*: proc(W:PWidget): TBB{.nimcall.}
-    handleEvent*: proc(W:PWidget; event:var al.TEvent): bool{.nimcall.}
+    handleEvent*: proc(W:PWidget; event:backend.PEvent): bool{.nimcall.}
+    detectCollisions*: proc(W:PWidget; pos:TPoint2d; result:var seq[PWidget]) {.nimcall.}
     eachWidget*:proc(W:PWidget; f:proc(W:PWidget)){.nimcall.}
-
+    eachChild*:proc(W:PWidget; f:proc(W:PWidget)){.nimcall.}
+    stringify*:proc(W:PWidget):string{.nimcall.}
+  TWidgetState* = enum 
+    WidgetHidden, WidgetDisabled, WidgetActive
   PWidget* = ref object of TObject
-    cache: TBB
-    style: TStyle
-    parent: TMaybe[PWidget]
-    name: TMaybe[string]
-    onClick*: PSignal[void]
-    vt: ptr TWidgetVT
+    cache*: TBB
+    style*: TStyle
+    class*: string
+    state*: TWidgetState
+    parent*: TMaybe[PWidget]
+    name*: TMaybe[string]
+    onClick*, lostFocus*, gainedFocus*: PSignal[void]
+    vt*: ptr TWidgetVT
 
 #proc pos* (W:PWidget): TPoint2d{.inline.}= point2d(w.cache.left, w.cache.top)
 proc pos_x*(W:PWidget):float{.inline.}= w.cache.left
@@ -78,56 +88,117 @@ proc `pos_y=`*(W:PWidget; y:float){.inline.}=
 proc draw* (W:PWidget) {.inline.} =
   if not w.vt.isNil: w.vt.draw w
 
-  
-
 proc setPos*(W:PWidget; pos:TPoint2d){.inline.} =
-  if not w.vt.isNil: w.vt.setPos w,pos
+  w.vt.setPos w,pos
+proc getPos*(W:PWidget): TPoint2d{.inline.}=
+  w.vt.getPos(w)
 proc getBB* (W:PWidget):TBB {.inline.}=
   result = w.vt.getBB(w)
+
 proc handleEvent*(W:PWidget; event:var al.TEvent):bool{.inline.}=
   if not w.vt.isNil:
     result = w.vt.handleEvent(w, event)
 proc eachWidget*(W:PWidget; f:proc(W:PWidget)) =
   w.vt.eachWidget(w, f)
-proc drawbb* (W:PWidget) {.inline.} = 
+proc children* (W:PWidget; f:proc(W:PWidget)) =
+  w.vt.eachChild(w, f)
+
+proc `$`* (w:PWidget): string =
+  w.vt.stringify(w)
+
+
+proc drawbb* (W:PWidget; color = mapRGB(255,0,0)) {.inline.} = 
   #proc draw_rectangle*(x1,y1,x2,y2:cfloat; color:TColor; thickness:cfloat)
-  if w.isnil: return
+  if w.isnil or w.state == widgetHidden: return
   
   let bb = w.getBB
-  draw_rectangle(
-    bb.left,bb.top, bb.right,bb.bottom, mapRGBA(255,0,0, 100), 2.0
-  )
+  draw(bb, color, 2.0)
+
 proc init* (W:PWidget) =
   w.onClick.init
-  
+  w.lostFocus.init
+  w.gainedFocus.init
+  w.state = widgetActive
 
-var defaultVT: TWidgetVT
+proc show* (W:pwidget) =
+  w.state = widgetActive
+proc hide* (w:pwidget) =
+  w.state = widgetHidden
+  
+proc toggleHidden* (W:PWidget) =
+  if w.state == widgetHidden: 
+    w.show
+  elif w.state == widgetActive:
+    w.hide
+
+proc findCollisions (widget:PWidget; p:TPoint2d; result:var seq[PWidget]) =
+  widget.vt.detectCollisions(widget, p, result)
+proc findCollisions* (root: PWidget; p: TPoint2d): seq[PWidget] =
+  result = @[]
+  root.findCollisions(p, result)
+  if (let idx = result.find(root); idx != -1):
+    # remove the root widget
+    result.delete idx
+
+
+
+var defaultVT*: TWidgetVT
 defaultVT.draw = proc(W:PWidget) = 
   discard 
 defaultVT.setPos = proc(W:PWidget; pos:Tpoint2d)=
   discard
+defaultVT.getPos = proc(W:PWidget): TPoint2d =
+  point2d(w.cache.left, w.cache.top)
 defaultVT.getBB = proc(W:PWidget): TBB =
   return w.cache
 defaultVT.handleEvent = proc(W:PWidget;event:var al.TEvent):bool=
   false
-defaultVT.eachWidget = proc (W:PWidget; f:proc(W:PWidget)) =
+defaultVT.detectCollisions = proc(W:PWidget; pos:TPoint2d; result: var seq[PWidget]) =
+  if w.state != widgetHidden:
+    if pos in w.getBB:
+      result.add w
+defaultVT.stringify = proc(W:PWidget):string =
+  "Widget"
+defaultVT.eachWidget = proc (W:PWidget;  f:proc(W:PWidget)) =
   f(w)
+defaultVT.eachChild = proc(W:PWidget; f:proc(W:PWidget)) =
+  # ignore, default widget doesnt have child (see container)
 
 type
   PContainer* = ref object of PWidget
-    ws: seq[PWidget]
+    ws*: seq[PWidget]
 
 var containerVT* = defaultVT
 containerVT.draw = proc(W:PWidget) =
-  for w in w.PContainer.ws:
-    draw w
+  if w.state != widgetHidden:
+    for w in w.PContainer.ws:
+      draw w
 containerVT.handleEvent = proc(W:PWidget; event:var al.TEvent): bool =
   for wid in w.PContainer.ws:
     if wid.handleEvent(event):
       return true
 containerVT.eachWidget = proc(W:PWidget; f:proc(W:PWidget)) =
   f(w)
-  for child in w.pcontainer.ws: f(child)
+  for child in w.pcontainer.ws: 
+    child.eachWidget f
+containerVT.stringify = proc(W:PWidget):string =
+  result = "(Container widget (name = $#, len = $#)".format(
+    w.name, w.PContainer.ws.len )
+  if w.PContainer.ws.len > 0:
+    result.add " ("
+    result.add((w.PContainer.ws.map do (W:PWidget) -> string: w.vt.stringify(w)).join(", "))
+    result.add ")"
+  result.add ")"
+      
+containerVT.detectCollisions = proc(W:PWidget; pos:TPoint2d; result:var seq[PWidget]) =
+  if pos in w.getBB:
+    let L = result.len
+    for widget in w.pcontainer.ws:
+      widget.vt.detectCollisions(widget, pos, result)
+    if L == result.len:
+      # no click detected in sub-things
+      # so add w itself
+      result.add w
 
 proc container* : PWidget =
   result = PContainer(
@@ -193,13 +264,16 @@ textLabelVT.draw = proc(W:PWidget)=
 textLabelVT.getBB = proc(W:PWidget): TBB =
   let w = w.PTextLabel
   if w.textChanged:
-    w.cache.width = w.style.font.f.get_text_width(w.text).float
+    w.cache.width = max(w.style.minimumWidth, w.style.font.f.get_text_width(w.text).float)
     w.cache.height = w.style.font.f.get_font_lineheight().float
     w.textChanged = false
   result = w.cache
 textLabelVT.setPos = proc(W:pwidget;pos:tpoint2d)=
   w.cache.left = pos.x
   w.cache.top = pos.y
+textLabelVT.stringify = proc(W:PWidget):string =
+  "(TextLabel (text=\"$#\"))".format(
+    w.PTextLabel.text )
 
 proc setText* (W:PTextLabel; text:string) =
   W.text = text
@@ -216,7 +290,8 @@ type
   PInputField* = ref object of PTextLabel
     cursor*: int
     textEntered*: PSignal[string]
-    
+    allowedChars*: set[char]
+
 var inpF_vt = textLabelVT
 inpf_vt.draw = proc(W:PWidget) =
   textLabelVT.draw(w)
@@ -228,10 +303,14 @@ inpf_vt.draw = proc(W:PWidget) =
   draw_line cursor_x, w.cache.top, 
     cursor_x, w.cache.top + w.style.font.f.get_font_line_height().float,
     w.style.fontColor, 1.0
-
+inpf_vt.stringify = proc(W:PWidget): string =
+  "(InputField (text=\"$#\"))" % W.PTextlabel.text
+  
 inpf_vt.handleEvent = proc(W:PWidget; event:var al.TEvent): bool =
   if event.kind == eventKeyChar:
-    if event.keyboard.unichar == '\b'.ord: return
+    if event.keyboard.unichar > 255 or
+       event.keyboard.unichar.char notin w.PInputField.allowedChars:
+      return 
   
     w.PInputfield.text.insert($(event.keyboard.unichar.char), w.PInputfield.cursor)
     w.PInputfield.cursor.inc 1
@@ -253,19 +332,25 @@ inpf_vt.handleEvent = proc(W:PWidget; event:var al.TEvent): bool =
         if w.cursor > w.text.len: w.cursor = w.text.len
         let rem = w.text[w.cursor .. -1]
         w.text.setLen w.cursor-1
-        echo repr(w.text)
-        echo repr(rem)
         w.text.add rem
         w.textChanged = true
         w.cursor = max(0, w.cursor-1)
-        
+    
+    of keyLeft:
+      w.cursor = max(0, w.cursor - 1)
+    of keyRight:
+      w.cursor = min(w.text.len, w.cursor + 1)
+    
     else:
       return false
     return true
 
 
-proc inputField* (text:string): PWidget =
-  result = PInputField(text:text,cursor:0, vt: inpf_vt.addr, textChanged:true)
+proc inputField* (text:string; allowedChars = {'\x20'..'\x7E'}): PWidget =
+  result = PInputField(
+    text:text, cursor:0, 
+    vt: inpf_vt.addr, textChanged:true,
+    allowedChars: allowedChars) 
   result.init
   result.PInputfield.textEntered.init
 
@@ -285,6 +370,8 @@ windowVT.setPos = proc(W:PWidget;pos:TPoint2d)=
   w.cache.expandToInclude w.child.getBB
 
 windowVT.draw = proc(W:PWidget) =
+  if w.state == widgetHidden: return
+  
   let w = algui.PWindow(w)
   discard """ draw_text(
     w.style.font, w.style.fontColor, w.pos_x, w.pos_y,
@@ -293,10 +380,23 @@ windowVT.draw = proc(W:PWidget) =
   w.title.draw
   w.child.draw
 windowVT.eachWidget = proc(W:PWidget; f:proc(W:PWidget)) =
+  let W = algui.PWindow(w)
   f(w)
-  f(algui.PWindow(w).title)
-  f(algui.PWindow(w).child)
+  w.title.eachWidget f
+  w.child.eachWidget f
+windowvt.eachChild = proc(W:PWidget; f:proc(W:PWidget)) =
+  f algui.pwindow(w).title
+  f algui.pwindow(w).child
+windowvt.stringify = proc(W:PWidget): string =
+  "(Window $# $#)".format( algui.pwindow(w).title , algui.pwindow(w).child )
+
+windowvt.detectCollisions = proc(w:pwidget; pos:tpoint2d; result:var seq[pwidget]) =
+  if w.state == widgetHidden: return
   
+  let w = algui.pwindow(w)
+  findCollisions( w.title, pos, result )
+  findCollisions( w.child, pos, result )
+
 proc setChild* (W:algui.PWindow; widget:PWidget) =
   w.child = widget
   widget.parent = just(w)
@@ -313,20 +413,27 @@ type
     log: seq[TChatMsg]
 
 var chatlogVT = defaultVT
+chatlogvt.getPos = proc(W:PWidget):TPoint2d=
+  point2d(w.cache.left, w.cache.bottom)
 chatlogvt.setPos = proc(W:PWidget;pos:tpoint2d) =
   w.cache.bottom = pos.y
   w.cache.left = pos.x
 chatlogvt.getBB = proc(W:PWidget):TBB =
   w.cache
-  
+chatlogvt.stringify = proc(W:PWidget): string =
+  "(Chatlog (last message = $#))".format(
+    if w.PChatlog.log.len > 0: w.PChatlog.log[w.PChatlog.log.high].text else: ""
+  ) 
 chatlogVT.draw = proc(W:PWidget) =
   let w = w.PChatlog
   let lineHeight = w.style.font.f.get_font_lineheight.float
-  var p = point2d(w.cache.left , w.cache.bottom - lineHeight.float)
+  var p = point2d( w.cache.left , w.cache.bottom )
+  p.x += w.style.paddingLeft
+  p.y -= lineHeight
+  
   for i in countdown(w.log.high, max(0, w.log.high-w.lines)):
     if p.y < -lineHeight: break
-    
-    draw_text w.style.font.f, w.style.fontColor, p.x,p.y,
+    draw_text w.style.font.f, w.log[i].color, p.x, p.y,
       fontAlignLeft, w.log[i].text
     p.y -= lineHeight
   
@@ -336,269 +443,3 @@ proc chatlog* (lines:int): PWidget =
   result = PChatlog(lines:lines, log: @[], vt: chatlogVT.addr)
   result.init
 
-
-import json
-
-type ImportState* = object
-  named*: TTable[string,PWidget]
-  defaultStyle*: TStyle
-
-proc importGui* (J:PJsonNode; s:var importstate): PWidget 
-
-proc importContainer (J:PJsonNode; s:var importstate): PWidget =
-  #let
-  result = container()
-  if j.hasKey("widgets"):
-    let ws = j["widgets"]
-    assert ws.kind == jArray
-    for it in ws.items:
-      let w = it.importGUI(s)
-      if not w.isNil:
-        result.PContainer.add w
-
-proc importWindow* (J:PJsonNode; s:var importstate): PWidget =
-  let title = j["title"].str
-  let r = algui.PWindow(windowWidget(title))
-  r.title.style = s.defaultStyle
-  
-  if j.hasKey"child":
-    r.setChild j["child"].importGUI(s)
-  
-  
-  result = r
-  
-proc importTextLabel* (J:PJsonNode; s:var importstate): PWidget =
-  let text = j["text"].str
-  result = textLabel(text)
-
-proc importVBox* (J:PJsonNode; s:var importstate): PWidget =
-  result = vbox()
-  if j.hasKey"widgets":
-    for it in J["widgets"]:
-      let w = it.importGUI(s)
-      if not w.isNil:
-        result.PContainer.add w
-proc importHbox* (J:PJsonNode; s:var importstate): PWidget =
-  result = hbox()
-  if j.hasKey"widgets":
-    for it in j["widgets"]:
-      let w = it.importGUI(s)
-      if not w.isNil:
-        result.PContainer.add w
-
-proc importcolor (J:PJsonNode): TColor =
-  if j.kind == jString:
-    return al.color_name(j.str)
-
-proc importInputfield* (J:PJsonNode; s:var importstate):PWidget =
-  var text: string
-  if j.hasKey"text": text = j["text"].str
-  else: text = ""
-  result = inputField(text)
-  
-
-proc importChatlog* (J:PJsonNode; s:var importstate): PWidget =
-  let lines = if j.hasKey("lines"): j["lines"].num.int else: 5
-  result = chatlog(lines)
-
-var
-  jsonVT = initTable[string,type(importChatlog)](16)
-  name2widget = initTable[string,proc(W:PWidget):bool](16)
-
-template zz (kind:string; ty; importF): stmt =
-  name2widget[kind] = proc(W:PWidget):bool = (w is ty)
-  jsonVT[kind] = importF
-zz "window", algui.PWindow, importWindow
-zz "vbox", PVbox, importVBox
-zz "hbox", PHbox, importHbox
-zz "inputfield",PInputField, importInputfield
-zz "chatlog", PChatlog, importChatlog
-zz "container", PContainer, importContainer 
-zz "textlabel", PTextlabel, importTextlabel
-zz "button", PTextlabel, importTextlabel
-
-proc importGui (J:PJsonNode; s:var importstate): PWidget =
-  assert j.kind == jObject
-  let kind = j["type"].str
-  
-  if jsonVT.hasKey(kind):
-    result = jsonVT[kind](j, s)
-  else:
-    echo "Warning: widget type unknown: \"$#\"" % kind
-  
-  if not result.isNil:
-    result.style = s.defaultStyle
-  
-  if j.hasKey("name"):
-    let n = j["name"].str
-    
-    if result.isNil:
-      echo "Named widget not created: ", n
-    else: 
-      assert(not s.named.hasKey(n))
-      s.named[n] = result
-      result.name = just(n)
-      when defined(debug):
-        echo "Named widget created: $#" % n
-
-type TGuiIndex * = tuple
-  root: PWidget
-  index: TTable[string,PWidget]
-
-proc toFloat* (J:PJsonNode): TMaybe[float]=
-  case j.kind
-  of jFloat: return just(j.fnum.float)
-  of jInt: return just(j.num.float)
-  else: 
-    discard
-
-type StyleState = object
-  fonts: TTable[string,RFont]
-  
-
-proc p* [T] (some:T):T{.inline.}=
-  echo some
-  some
-
-proc update (W: PWidget; S:var TStyle; J:PJsonNode; ss:StyleState ) =
-  if j.haskey"font":
-    s.font = ss.fonts[j["font"].str]
-  if j.haskey"fontcolor":
-    s.fontColor = importColor(j["fontcolor"])
-  if j.hasKey"padding-right":
-    s.paddingRight = j["padding-right"].toFloat.val
-  if j.hasKey"padding-bottom":
-    s.paddingBottom = j["padding-bottom"].toFloat.val
-  
-  if j.hasKey"width":
-    let width = j["width"].toFloat
-    if width.has:
-      w.cache.width = width.val
-  
-  if j.hasKey"height":
-    let height = j["height"]
-    if height.kind == jstring:
-      if height.str[height.str.len-1] == '%':
-        var pct = height.str[0 .. height.str.len-2].parseFloat.float / 100.0 
-        w.cache.height = w.parent.val.cache.height * pct
-      else:
-        let h = j["height"].toFloat
-        if h.has:
-          w.cache.height = h.val
-
-  if j.hasKey"position":
-    let pos = j["position"]
-    case pos.str
-    of "center":
-      echo "Setting center on ", w.name
-      assert w.parent.has #assert(not w.parent.isNil)
-      
-      let parents = w.parent.val.getBB
-      echo "parents bb (", w.name, ")" , " (parent is ", w.parent.val.name, " ", parents, ")"
-      let parent_center = parents.center
-      echo " center = ", parent_center
-      
-      w.setPos point2d(0,0)
-      let center = w.getBB.center
-      
-      let pos = point2d(parent_center.x - center.x, parent_center.y - center.y)
-      w.setPos pos
-    of "right-margin":
-      let parentBB = w.parent.val.getBB
-      let width = w.cache.width
-      w.setPos point2d(parentBB.right - width, parentBB.top)
-    
-    of "bottom-margin":
-      let parentBB = w.parent.val.getBB
-      let hei = w.getBB.height
-      w.setPos point2d(parentBB.left, parentBB.bottom - hei)
-      
-    else:
-      echo "Unhanded \"position\" element: ",$pos
-
-proc im_style* (J:PJsonNode; ss: StyleState) : TStyle=
-  result.fontColor = mapRGB(255,255,255)
-  update nil, result, j, ss
-
-
-proc importGUI* (file:string; viewW, viewH: float): TGuiIndex = 
-  let n = json.parseFile(file)
-  var s: ImportState
-  s.named = initTable[string,PWidget](32)
-  
-  var ss : StyleState
-  ss.fonts =  initTable[string,RFont](32)
-  var fontDirs = @[ expandFilename(".") ]
-  fontDirs.add systemFontDirectories()
-  
-  for key,val in n["fonts"]:
-    let files = find_file(val["file"].str, fontDirs)
-    if files.len == 0:
-      echo "Could not find font ", key, " (", val["file"].str, ")"
-      continue
-    
-    let size = val["size"].num.cint
-    
-    var f: PFont
-    for file in files:
-      f = al.loadFont(file, size, 0)
-      if not f.isNil: break
-    
-    if f.isNil:
-      echo "Failed to load font ", key
-    else:
-      ss.fonts[key] = f.fontR
-  
-  var styles = n["style"]
-  var skip: seq[int] = @[]
-  block:
-    for i in 0 .. < styles.len:
-      if styles[i][0].kind == jString and styles[i][0].str == "default":
-        s.defaultStyle = styles[i][1].im_style(ss)
-        skip.add i
-  
-  echo repr(s.defaultStyle)
-  
-  result.root = n["root"].importGui(s)
-  result.index = s.named
-  
-  result.root.cache.width = viewW
-  result.root.cache.height = viewH
-  
-  # apply styles
-  for idx in 0 .. < styles.len:
-    if idx in skip: continue
-    
-    echo styles[idx]
-    let s = styles[idx]
-  
-    let
-      matcher = s[0]
-      style = s[1]
-    
-    if matcher.kind == jString:
-      # name lookup
-      let w = result.index[matcher.str]
-      w.update w.style, style, ss
-      continue
-    if matcher.kind == jObject:
-      var match_funcs: seq[proc(W:PWidget):bool] = @[]
-      
-      if matcher.hasKey"type":
-        let t = matcher["type"].str
-        let f = name2widget[t]
-        if f.isNil:
-          echo "unk widget type ", t
-          continue
-        else:
-          match_funcs.add f
-      
-      if match_funcs.len > 0:
-        result.root.eachWidget do (W:PWidget):
-          for f in match_funcs:
-            if not f(w): 
-              return
-          w.update w.style, style, ss
-    else:
-      echo "what is this ", matcher
-  
