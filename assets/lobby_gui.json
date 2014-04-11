@@ -1,0 +1,20 @@
+{
+  "fonts":{
+    "regular":{
+      "file":"Vera.ttf",
+      "size":14,
+    },
+  },
+  "style":[
+    ["default",{"font":"regular"}],
+    ["gamelist",{"position":[100,100]}],
+    [{"class":"gamelist-item"},{"font":"regular"}],
+  ],
+  
+  "root": {
+    "type":"container",
+    "widgets":[
+      {"type":"vbox","name":"gamelist"}
+    ]
+  }
+}

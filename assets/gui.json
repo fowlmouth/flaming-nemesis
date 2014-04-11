@@ -19,14 +19,16 @@
       "font":"regular",
       "fontcolor":"white"
     }],
-    [{"type":"textlabel"}, {"padding-right":6,"padding-bottom":4}],
+    [{"type":"textlabel"}, {"minimum-width":20,"padding-right":6,"padding-bottom":4}],
     
     ["chatarea",{
       "height":"100%",
     }],
     ["chat",{
       "height":"95%",
-      "font":"mono"
+      "width":15,
+      "font":"mono",
+      "padding-left":5
     }],
     ["chatinput",{
       "font":"mono",
@@ -43,12 +45,32 @@
     ["sidepane",{
       "width":150,
       "position":"right-margin"
-    }]
+    }],
+    
+    ["opts",{
+      "width":100,
+      "position":"left-margin",
+    }],
   ],
+
+  "schema":{
+    "controllers":["ShowLoginForm","Quit","SubmitLogin","SubmitChat"],
+    "name2kind": {
+      "user":"inputfield",
+    }
+  },
 
   "root": {
     "type": "container",
     "widgets": [
+      {"name":"opts","type":"vbox","widgets":[
+        {"type":"button","text":"Toggle Overlay","controller":"ToggleOverlay"},
+        {"type":"vbox","widgets":[
+          {"type":"button","text":"Login","controller":"ShowLoginForm"},
+          {"type":"button","text":"Quit","controller":"Quit"},
+          {"type":"button","text":"Reconnect","controller":"Reconnect"},
+        ]}
+      ]},
       {
         "name": "loginform",
         "type": "window",
@@ -77,7 +99,8 @@
             },{
               "type":"button",
               "name":"submit-login",
-              "text":"Log In."
+              "text":"Log In.",
+              "controller":"SubmitLogin"
             },
           ]
         }
@@ -91,6 +114,8 @@
           },{
             "name":"chatinput",
             "type":"inputfield",
+            "controller":"SubmitChat",
+            "text":"ajdhfakldf"
           }
         ]
       },{
