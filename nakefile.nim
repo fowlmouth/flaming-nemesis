@@ -1,4 +1,4 @@
-import nake
+import nake, strutils
 
 const
   serverExe = "server"
@@ -6,12 +6,14 @@ const
   
   releaseDefines = "-d:release" 
 
-  games = ["pong"]
+  games = ["pong", "gui_designer"]
+let
+  gameImports = games.map(proc(x:string):string="--import:games/$#" % x).join" "
 
 task "build-server","build the server":
-  shell "nimrod c", serverExe
+  shell "nimrod c", gameImports, serverExe
 task "build-launcher","build the launcher":
-  shell "nimrod c", launcherExe
+  shell "nimrod c", gameImports, launcherExe
 
 task "build-both","run both of those ^":
   runTask("build-server")
@@ -32,4 +34,4 @@ task "build-games", "build all of the games in src/games individually":
   else:
     echo "All games built bro."
 task "release","":
-  shell "nimrod c", releaseDefines, launcherExe
+  shell "nimrod c", releaseDefines, gameImports, launcherExe
