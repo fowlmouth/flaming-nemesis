@@ -21,13 +21,16 @@ type
     importer:proc(J:PJsonNode;S:ImportState):PWidget
   
   TWidgetControllers* = object
-    onClick*: TTable[string,proc()]
-    textEntered*: TTable[string,proc(text:string)]
+    # TODO make these take w:PWidget and be bound to the corresponding signal
+    onClick*: TTable[string,proc(){.closure.}]
+    textEntered*: TTable[string,proc(text:string){.closure.}]
+    lostFocus*: TTable[string,proc(){.closure.}]
+    gainedFocus*: TTable[string,proc(){.closure.}]
   ImportState* = ref object
     named*: TTable[string,PWidget]
     defaultStyle*: TStyle
     ctrls*: TWidgetControllers
-    env*: TTable[string,TMaybe[TValidator]]
+    env*: TTable[string,TValidator]
 
 proc widgetControllers* (
     onClick: openarray[tuple[key:string, val:proc()]],
@@ -123,12 +126,12 @@ proc importChatlog* (J:PJsonNode; s:importstate): PWidget =
   result = chatlog(lines)
 
 template zz (ty; importF): expr =
-  just(TValidator(
+  TValidator(
     typeChecker: (proc(W:PWidget):bool= 
-      result = w is ty
-      echo "result of typeChecker: ", result),
+      result = w of ty
+      echo "result of typeChecker(",astToStr(ty),"): ", result, " ", $w, "\L\L"),
     importer: importF
-  ))
+  )
 
 var
   baseGUIenv* = {
@@ -146,12 +149,12 @@ proc importGui (J:PJsonNode; s:importstate): PWidget =
   assert j.kind == jObject
   let kind = j["type"].str
   
-  let (has, validator) = s.env[kind]
-  if has:
-    result = validator.importer(j, s)
-  else:
+  let validator = s.env[kind]
+  if validator.importer.isNil:
     echo "Warning: widget type unknown: \"$#\"" % kind
     return
+  else:
+    result = validator.importer(j, s)
   
   if not result.isNil:
     result.style = s.defaultStyle
@@ -237,11 +240,13 @@ proc toFloat* (J:PJsonNode): TMaybe[float]=
 type StyleState = object
   fonts: TTable[string,RFont]
   
-
+import sequtils
 
 proc update (W: PWidget; S:var TStyle; J:PJsonNode; ss:StyleState ) =
   if j.haskey"font":
     s.font = ss.fonts[j["font"].str]
+    if s.font.isNil:
+      raise newException(EIO, "Unable to find font "& j["font"].str & " (available: $#)" % toSeq(ss.fonts.keys).join(", "))
   if j.haskey"fontcolor":
     s.fontColor = importColor(j["fontcolor"])
   if j.hasKey"padding-right":
@@ -278,7 +283,9 @@ proc update (W: PWidget; S:var TStyle; J:PJsonNode; ss:StyleState ) =
           x = pos[0].toFloat
           y = pos[1].toFloat
         if x and y:
-          w.setPos point2d(x.val,y.val)
+          let p = point2d(x.val, y.val)
+          echo "Setting ", w, " pos to ", p
+          w.setPos p
           
     
     of jString:
@@ -320,7 +327,7 @@ proc postStyles* (gui:TGuiIndex) =
   gui.root.eachWidget do (w:PWidget):
     if w.parent.has and w.style.font.isNil:
       w.style.font = w.parent.val.style.font
-
+      
 proc applyStyles* (gui:TGuiIndex; styles: seq[PJsonNode]; ss:stylestate; validators: type(baseGUIenv)) =
 
   for s in styles:
@@ -336,15 +343,18 @@ proc applyStyles* (gui:TGuiIndex; styles: seq[PJsonNode]; ss:stylestate; validat
       continue
     
     if matcher.kind == jObject:
+      echo "----------------\LMatching ", matcher
+      
       var match_funcs: seq[proc(W:PWidget):bool] = @[]
       
       if matcher.hasKey"type":
         let t = matcher["type"].str
-        let (has,validator) = validators[t]
-        if has:
+        let validator = validators[t]
+        if not validator.typeChecker.isNil:
           match_funcs.add validator.typeChecker
         else:
-          echo "unknownn widget type ", t
+          echo "  unknown widget type ", t
+          quit 1
           continue
       
       if matcher.hasKey"class":
@@ -355,9 +365,11 @@ proc applyStyles* (gui:TGuiIndex; styles: seq[PJsonNode]; ss:stylestate; validat
       
       if match_funcs.len > 0:
         gui.root.eachWidget do (W:PWidget):
+          echo "  Checking ", w, " (", match_funcs.len, " match funcs)"
           for f in match_funcs:
             if not f(w):
               return
+          echo " ! Updating style for ", w, " to ", style
           w.update w.style, style, ss
     else:
       echo "what is this ", matcher
@@ -376,11 +388,15 @@ proc importGUI* (
   
   var ss : StyleState
   ss.fonts =  initTable[string,RFont](32)
-  var fontDirs = @[ expandFilename(".") ]
+  var fontDirs = @[ expandFilename("."/"assets") ]
   fontDirs.add systemFontDirectories()
   
-  if j.hasKey"fonts":
-    for key,val in j["fonts"]:
+  var jfonts: PJsonNode
+  if j.hasKey"fonts": jFonts = j["fonts"]
+  elif j.hasKey"font": jFonts = j["font"]
+  
+  if not jFonts.isNil:
+    for key,val in jFonts.pairs:
       let files = find_file(val["file"].str, fontDirs)
       if files.len == 0:
         echo "Could not find font ", key, " (", val["file"].str, ")"
@@ -394,7 +410,7 @@ proc importGUI* (
         if not f.isNil: break
       
       if f.isNil:
-        echo "Failed to load font ", key
+        raise newException(EIO, "Failed to load font "& key)
       else:
         ss.fonts[key] = f.fontR
   

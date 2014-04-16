@@ -1,12 +1,17 @@
 import 
   enetcon, packets, pkt_tools,
-  connection_common,
-  tables, strutils, fowltek/idgen
+  connection_common, json,
+  tables, strutils, 
+  fowltek/idgen
 
 
 const
   port = 8024
-
+let
+  defaultConfig = %{
+    "name": %"SomeServer",
+    "port": %8024
+  }
 
 type
   TUserLevel* = enum
@@ -19,7 +24,7 @@ type
     peer*: RPeer
 
   PServer* = ref object
-    ut*: UserTable
+    ut*: UserTable[PUser]
 
 proc srv * (con: PConnection): PServer =
   cast[PServer](con.data)
@@ -46,7 +51,7 @@ proc sendUserlist* (P:RPeer) =
 import algorithm
 proc `<`* (a,b:TUser):bool = a.id < b.id
 
-var vt = defaultVT
+var vt = packets.defaultVT
 
 vt.onConnect = proc(C:PConnection; client:int) = 
   when defined(Debug):
@@ -102,11 +107,13 @@ defPkt(vt,pktLogin):
 
 vt.onDisconnect = proc(C:PConnection; client:int) =
   let srv = c.srv
-  var pkt = initOpkt(8)
-  pkt << TDisconnect(user: client.TUserID)
-  c.broadcast pkt, channel0, flagReliable
   
-  srv.ut.users[client].reset
+  if client in 0 .. srv.ut.users.high and not srv.ut.users[client].name.isNil:
+    var pkt = initOpkt(8)
+    pkt << TDisconnect(user: client.TUserID)
+    c.broadcast pkt, channel0, flagReliable
+    
+    srv.ut.users[client].reset
 
 host = newConnection(vt)
 host.data = cast[pointer](PServer(ut: initUsertable()))

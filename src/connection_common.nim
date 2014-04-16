@@ -1,21 +1,30 @@
 import packets, tables, fowltek/maybe_t
 
 type
-  UserTable* = object
-    users*: seq[TUser]
+  UserInterface* = generic u
+    u.id is int
+    u.name is string
+
+  UserTable* [T] = object
+    users*: seq[T]
     name2user*: TTable[string,int]
 
-proc save* (ut:var usertable; user:TUser) =
+proc save* [T] (ut:var usertable[T]; user: T) =
   ut.users.ensureLen user.id+1
   ut.users[user.id] = user
   ut.name2user[user.name] = user.id
 
-proc find* (ut:var userTable; user: TInteger): TMaybe[ptr TUser] =
+proc find* [T] (ut:var userTable[T]; user: TInteger): TMaybe[ptr T] =
   # get a temporary pointer to the TUser record
   let user = user.int
-  if user in 0 .. len(ut.users)-1 and not ut.users[user].name.isNil:
-    result = just(ut.users[user].addr)
+  if user in 0 .. len(ut.users)-1:
+    let u = ut.users[user].addr
+    if not u.isNil and not u.name.isNil:
+      return just(u)
 
-proc initUsertable* : UserTable =
-  result.users.newSeq 0
-  result.name2user = initTable[string,int](32)
+proc init* [T] (ut:var userTable[T]) =
+  assert T is UserInterface
+  ut.users.newSeq 0
+  ut.name2user = initTable[string,int](32)
+
+

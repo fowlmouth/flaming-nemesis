@@ -15,7 +15,7 @@ import enetcon, packets, connection_common
 type
   PChatState* = ref object of TObject
     client*: PConnection
-    ut*: UserTable
+    ut*: UserTable[TUser]
     gui*: TGuiIndex
     loginForm*, userList, chatArea*, sidepane: PWidget
     chatlog*: PChatLog
@@ -24,6 +24,11 @@ type
 
 var
   vt = packets.defaultVT
+
+proc log* (cs:PChatstate; fmt:string; args:varargs[string,`$`]) =
+  let s = fmt.format(args)
+  cs.chatlog.add s, green
+  echo s
 
 proc connect (cs: PChatState; ip:string; port:int; timeout:float): bool =
   try:
@@ -75,7 +80,8 @@ proc cSubmitChat (cs:PChatState): proc(text:string) =
 proc cReconnect (cs:PChatState): proc() =
   return proc =
     if not cs.connect( address[0],address[1], 0.1 ):
-      cs.chatLog.add "Failed to connect to $#:$#".format(address[0],address[1]), green
+      cs.log "Failed to connect to $#:$#", address[0],address[1]
+
 proc cToggleOverlay (cs:PChatstate):proc()=
   return proc =
     let child = cs.opts.pcontainer.ws[1]
@@ -93,7 +99,7 @@ proc cToggleOverlay (cs:PChatstate):proc()=
 proc newChatstate* (man:GSM; file: string; w,h: float): PChatstate =
   var res: PChatState
   new res
-  res.ut = initUsertable()
+  res.ut.init
   res.showOpts = true
   
   var controllers = widgetControllers(

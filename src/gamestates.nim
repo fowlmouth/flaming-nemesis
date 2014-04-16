@@ -127,7 +127,34 @@ proc newGSM* (w,h:int; title:string): GSM =
   
   result.states.newSeq 0
 
-    
+discard """ template run_main_arg* (argument; argName; body:stmt): stmt =
+  discard al.run_main(0, cast[cstringarray](argument)) do (argc:cint,argv:cstringarray)->cint{.cdecl.}:
+    let argName{.inject.} = cast[type(argument)](argv)
+    body 
+     """
+discard """ proc run_main_arg [T:ref|ptr] (arg:T; func:proc(arg:T){.nimcall.}) =
+  type TBlah = tuple[func: proc(arg:T){.nimcall.}, arg: T]
+  var arr: TBlah = (func, arg)
+  discard al.run_main(0, cast[cstringarray](addr arr)) do (argc:cint;argv:cstringarray)->cint{.cdecl.}:
+    let (func,arg) = cast[ptr TBlah](argv)[]
+    func arg
+ """
+
+
+proc al_main2* [T] (arg:T; func:proc(arg:T){.nimcall.}) =
+    #block:
+    type TBlah = tuple[func: type(func), arg: T]
+    var hax : TBlah = (func,arg)
+    discard al.run_main(0, cast[cstringarray](hax.addr)) do (argc:cint;argv:cstringarray)->cint{.cdecl.}:
+      let hax = cast[ptr TBlah](argv)
+      hax.func hax.arg
+
+template al_main2* (body:stmt):stmt =
+  discard run_main(0, nil, proc(argc:cint; argv:cstringarray):cint{.cdecl.} =
+    body
+  )
+
+
 proc run* (M: GSM) =
   
   m.running = true
@@ -149,21 +176,23 @@ proc run* (M: GSM) =
         m.window.display
 
   elif defined(useAllegro):
-    discard al.run_main(0, cast[cstringarray](m)) do (argc:cint, argv:cstringarray)->cint{.cdecl.}:
-      let m = cast[GSM](argv) 
+    
+    #discard al.run_main(0, cast[cstringarray](m)) do (argc:cint, argv:cstringarray)->cint{.cdecl.}:
+    #  let man = cast[GSM](argv)
+    al_main(m) do (man:GSM):
       var
         last = getTime()
         drawTimer = createTimer(framerate)
-        evt: al.TEvent
+        evt{.noInit.}: al.TEvent
         
-      m.queue.register drawTimer.eventSource
+      man.queue.register drawTimer.eventSource
       drawTimer.start
       
-      while m.running:
-        m.queue.waitForEvent(evt)
-        if evt.kind == eventKeyDown: m.keyDown[evt.keyboard.keycode] = true
-        elif evt.kind == eventKeyUp: m.keyDown[evt.keyboard.keycode] = false
-        if m.topGS.vt.handleEvent(m.topGS, evt):
+      while man.running:
+        man.queue.waitForEvent(evt)
+        if evt.kind == eventKeyDown: man.keyDown[evt.keyboard.keycode] = true
+        elif evt.kind == eventKeyUp: man.keyDown[evt.keyboard.keycode] = false
+        if man.topGS.vt.handleEvent(man.topGS, evt):
           continue
         
         if evt.kind == eventTimer and evt.timer.source == drawTimer.eventSource:
@@ -171,12 +200,12 @@ proc run* (M: GSM) =
             let dt = last - cur
             last = cur
             
-            m.topGS.vt.update m.topGS, dt
+            man.topGS.vt.update man.topGS, dt
             
-            set_target_backbuffer m.display
+            set_target_backbuffer man.display
             clearToColor mapRGB(0,0,0)
-            var ds = drawState(d:m.display)
-            m.topGS.vt.draw(m.topGS, ds)
+            var ds = drawState(d:man.display)
+            man.topGS.vt.draw(man.topGS, ds)
             flipDisplay()
 
       drawTimer.stop

@@ -10,6 +10,7 @@ iterator mitems* [T] (s:var seq[T]): var T {.inline.}=
 const
   channel0* = 0.cuchar
   channel1* = 1.cuchar
+  channels* = 2
 type
   TPktID* = uint16
   TUserID* = int32
@@ -17,25 +18,35 @@ type
     pktChat = 0, 
     pktUserList,
     pktLogin,
-    pktDisconnect
+    pktDisconnect,
+    pktGame, pktGamelist
 
 import enetcon, enet, pkt_tools, strutils
+
+
+template load_impl*  (ty; body:stmt):stmt {.immediate.}=
+  proc `>>`* (L:PIpkt; R:var ty) =
+    body
+template store_impl* (ty; body:stmt):stmt {.immediate.}=
+  proc `<<`* (L:var Opkt; R:ty) =
+    body
+
 
 template defPkt* (vt; id; body:stmt): stmt {.immediate.} =
   if vt.incoming.len < id.int+1:
     vt.incoming.setLen id.int+1
-  vt.incoming[id.int] = proc(con:PConnection; origin:int; pkt:PPacket) =
+  vt.incoming[id.int] = proc(con:PConnection; origin:int; pkt:PIpkt) =
     body
 
 type
   TChat* = object
     user*: int32
     msg*: string
-proc `<<`* (L:var OPkt; R:TChat) =
+store_impl(TChat):
   L << pktChat.TPktID
   L << r.user
   L << r.msg
-proc `>>`* (L:PPacket; R:var TChat) =
+load_impl(TChat):
   L >> r.user
   L >> r.msg
 
@@ -55,10 +66,10 @@ type
     numUsers*: uint16
     users*: seq[TUser]
 
-proc `>>`* (L:PPacket; R:var TUser) =
+load_impl(TUser):
   L >> R.id
   L >> R.name
-proc `>>`* (L:PPacket; R:var TUserList) =  
+load_impl(TUserlist):  
   var userID: int32
   L >> userID
   while userID != -1:
@@ -70,10 +81,10 @@ proc `>>`* (L:PPacket; R:var TUserList) =
   L >> r.numUsers
   assert r.numUsers.int == r.users.len
   
-proc `<<`* (L:var Opkt; R: TUser) =
+store_impl(TUser):
   L << r.id
   L << r.name
-proc `<<`* (L:var Opkt; R: TUserList) =
+store_impl(TUserList):
   L << pktUserList.TPktID
   var numUsers = 0
   
@@ -96,10 +107,10 @@ defPkt(defaultVT, pktUserList):
 type
   TLogin* = object
     name*: string
-
-proc `>>`* (L:PPacket; R:var TLogin)=
+ 
+load_impl(TLogin):
   L >> R.name
-proc `<<`* (L:var Opkt; R:TLogin) =
+store_impl(TLogin):
   L << pktLogin.TPktID
   L << R.name
 
@@ -111,9 +122,10 @@ defPkt(defaultVT, pktLogin):
 type
   TDisconnect* = object
     user*: TUserID
-proc `>>`* (L:PPacket; R:var TDisconnect) =
+
+load_impl(TDisconnect):
   L >> r.user
-proc `<<`* (L:var Opkt; R:TDisconnect)=
+store_impl(TDisconnect):
   L << pktDisconnect.tpktid
   L << r.user
 defPkt(defaultVT, pktDisconnect):
@@ -122,6 +134,42 @@ defPkt(defaultVT, pktDisconnect):
   echo "User ", d.user, " disconnected."
 
 
+type
+  TGamePkt* = object
+    gameID*: int16
+load_impl(TGamePkt):
+  L >> r.gameID
+store_impl(TGamePkt):
+  L << pktGame.tpktid
+  L << r.gameID
+
+defPkt(defaultVT, pktGame):
+  var gp: TGamePkt
+  pkt >> gp.gameID
+  echo "Game packet not handled! id = ", gp.gameID
+
+type
+  TGameRecord* = tuple
+    id: int16
+    name: string
+  TGamelist* = object
+    games*: seq[TGameRecord]
+
+load_impl(TGamerecord):
+  L >> r.id
+load_impl(Tgamelist):
+  L >> r.games
+store_impl(TGameRecord):
+  L << r.id
+  L << r.name
+store_impl(TGamelist):
+  L << pktGamelist.tpktid
+  L << r.games
+
+defPkt(defaultVT, pktGamelist):
+  var gl: TGamelist
+  pkt >> gl
+  echo "Game list: ", gl.games
 
 
 

@@ -248,6 +248,8 @@ proc hbox* : PWidget =
   result = PHbox(ws: @[], vt: hboxvt.addr)
   result.init
 
+template wigout(msg): stmt =
+  raise newexception(ebase,msg)
 
 type
   PTextLabel* = ref object of PWidget
@@ -257,6 +259,9 @@ var textLabelVT* = defaultVT
 textLabelVT.draw = proc(W:PWidget)=
   let W = W.PTextLabel
   if W.text.isNil: return
+  #if w.style.font.isNil:
+  #  return
+  
   draw_text(
     w.style.font.f, w.style.fontColor, w.pos_x, w.pos_y, 
     fontAlignLeft, w.text.cstring

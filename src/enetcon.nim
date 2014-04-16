@@ -23,7 +23,7 @@ type
       peerID: TIdgen[int]
     data*:pointer
     
-  TPktHandler* = proc(C:PConnection; origin:int; pkt:PPacket)
+  TPktHandler* = proc(C:PConnection; origin:int; pkt:PIpkt) 
   TConnectionVT* = object
     onConnect*: proc(C:PConnection; client:int) # run when a client connects
     onDisconnect*:proc(C:PConnection; client:int) # run when a client disconnects
@@ -91,9 +91,10 @@ proc connectClient* (C:PConnection; ip:string; port:int16; timeout = 5.0;
     evt.packet.destroy
     conFail 3 
 
+  var pkt = evt.packet.to_ipkt
   var clientID: int32
-  evt.packet >> clientID
-  evt.packet.referenceCount = 0
+  pkt >> clientID
+  #evt.packet.referenceCount = 0
   evt.packet.destroy
   
   c.peer.id = clientID
@@ -102,9 +103,9 @@ proc connectClient* (C:PConnection; ip:string; port:int16; timeout = 5.0;
     c.vt.onConnect(c, clientID)
 
 
-proc dispatch* (C:PConnection; client:int; pkt:PPacket) =
+proc dispatch* (C:PConnection; client:int; pkt:PIpkt) =
   # 
-  while pkt.referenceCount < pkt.dataLength:
+  while pkt.index < pkt.dataSize:
     var
       ty: uint16
     pkt >> ty
@@ -197,9 +198,10 @@ proc update* (C:PConnection; iterations = 100) =
       var origin: int
       if c.kind == conServer:
         origin = cast[RPeer](evt.peer.data).id  
-      C.dispatch origin, evt.packet
-      evt.packet.referenceCount = 0
+      var pkt = evt.packet.to_ipkt
+      C.dispatch origin, pkt
+      #evt.packet.referenceCount = 0
       evt.packet.destroy
-  
+
     else:
       break
