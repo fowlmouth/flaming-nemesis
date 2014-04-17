@@ -124,12 +124,14 @@ lobbyGS.draw = proc(GS:GameState; ds:DrawState) =
 
 
 lobbyGS.handleEvent = proc(GS:GameState; event:backend.PEvent): bool=
+  if baseGS.handleEvent(gs, event): return true
+  
   let GS = GS.PLobbyGS
   
   when defined(useAllegro):
     if event.kind == eventTimer and event.timer.source == gs.networkTimer.eventSource:
       when netEnabled:
-        gs.chat.client.update
+        gs.chat.tick
 
   if GS.chat.handleEvent(event) or 
      GS.gui.dispatch(event):

@@ -26,11 +26,16 @@ type
     textEntered*: TTable[string,proc(text:string){.closure.}]
     lostFocus*: TTable[string,proc(){.closure.}]
     gainedFocus*: TTable[string,proc(){.closure.}]
+ 
+  StyleState = object
+    fonts*: TTable[string,RFont]
+  
   ImportState* = ref object
     named*: TTable[string,PWidget]
     defaultStyle*: TStyle
     ctrls*: TWidgetControllers
     env*: TTable[string,TValidator]
+    ss: StyleState
 
 proc widgetControllers* (
     onClick: openarray[tuple[key:string, val:proc()]],
@@ -143,6 +148,11 @@ var
     "button":zz(PTextlabel, importTextlabel)
   }.toTable
 
+
+
+
+proc update (W: PWidget; S:var TStyle; J:PJsonNode; ss:StyleState )
+
 proc importGui (J:PJsonNode; s:importstate): PWidget =
   assert j.kind == jObject
   let kind = j["type"].str
@@ -159,6 +169,8 @@ proc importGui (J:PJsonNode; s:importstate): PWidget =
   
     if j.hasKey"class":
       result.class = j["class"].str
+    if j.hasKey"style":
+      result.update result.style, j["style"], s.ss
   
   if j.hasKey("name"):
     let n = j["name"].str
@@ -172,12 +184,15 @@ proc importGui (J:PJsonNode; s:importstate): PWidget =
       when defined(debug):
         echo "Named widget created: $#" % n
 
+
 type 
   TGuiIndex * = object
     root*: PWidget
     index*: TTable[string,PWidget]
-    fonts*: TTable[string,RFont]
+    ss*: StyleState
     focused*: TMaybe[PWidget]
+
+proc fonts* (gi:TGuiIndex): TTable[string,RFont] = gi.ss.fonts
 
 proc setFocus (gui:var TGuiIndex; widget: PWidget) =
   if widget.isNil: 
@@ -235,9 +250,6 @@ proc toFloat* (J:PJsonNode): TMaybe[float]=
   else: 
     discard
 
-type StyleState = object
-  fonts: TTable[string,RFont]
-  
 import sequtils
 
 proc update (W: PWidget; S:var TStyle; J:PJsonNode; ss:StyleState ) =
@@ -341,20 +353,15 @@ proc applyStyles* (gui:TGuiIndex; styles: seq[PJsonNode]; ss:stylestate; validat
       continue
     
     if matcher.kind == jObject:
-      echo "----------------\LMatching ", matcher
-      
       var match_funcs: seq[proc(W:PWidget):bool] = @[]
       
       if matcher.hasKey"type":
         let t = matcher["type"].str
-        let validator = validators[t]
-        if not validator.typeChecker.isNil:
-          match_funcs.add validator.typeChecker
+        if(let typeChecker = validators[t].typeChecker; not typeChecker.isNil):
+          match_funcs.add typeChecker
         else:
-          echo "  unknown widget type ", t
-          quit 1
-          continue
-      
+          raise newException(EIO, "Unknown widget type "& t)
+
       if matcher.hasKey"class":
         let class = matcher["class"].str
         match_funcs.add(proc(W:PWidget): bool =
@@ -382,8 +389,8 @@ proc importGUI* (
   s.ctrls = controllers
   s.named = initTable[string,PWidget](32)
   
-  var ss : StyleState
-  ss.fonts =  initTable[string,RFont](32)
+  s.ss = styleState(fonts: initTable[string,RFont](32))
+  
   var fontDirs = @[ expandFilename("."/"assets") ]
   fontDirs.add systemFontDirectories()
   
@@ -408,20 +415,19 @@ proc importGUI* (
       if f.isNil:
         raise newException(EIO, "Failed to load font "& key)
       else:
-        ss.fonts[key] = f.fontR
+        s.ss.fonts[key] = f.fontR
   
   var styles : seq[PJsonNode] = @[]
   if j.hasKey"style":
     for i in 0 .. < j["style"].len:
       let this_style = j["style"][i]
       if this_style[0].kind == jString and this_style[0].str == "default":
-        s.defaultStyle = this_style[1].im_style(ss)
+        s.defaultStyle = this_style[1].im_style(s.ss)
       else:
         styles.add this_style
   
   result.root = j["root"].importGui(s)
   result.index = s.named
-  result.fonts = ss.fonts
   
   result.root.cache.width = viewW
   result.root.cache.height = viewH
@@ -430,7 +436,7 @@ proc importGUI* (
     preStyle()
   
   # apply styles
-  result.applyStyles styles, ss, s.env
+  result.applyStyles styles, s.ss, s.env
   result.postStyles
 
 

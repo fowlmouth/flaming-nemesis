@@ -149,7 +149,8 @@ proc newChatstate* (man:GSM; file: string; w,h: float): PChatstate =
 
 proc draw* (cs:PChatState; ds:DrawState) =
   cs.gui.root.draw
-
+proc tick* (cs:PChatState) {.inline.} =
+  cs.client.update
 
 proc handleEvent* (CS:PChatState; event: backend.PEvent): bool =
   result = cs.gui.dispatch(event)

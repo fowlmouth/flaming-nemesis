@@ -19,12 +19,12 @@ let gui_data = %{
   },
   "style": %[
     %[%{"type": %"textlabel"}, %{
-      "font": %"regular", "fontcolor": %"white", "position": %[%10,%300] }]
+      "font": %"regular", "fontcolor": %"white" }]
   ],
   "root": %{
     "type": %"container",
     "widgets": %[
-      %{"type": %"textlabel", "text": %"Hello"}
+      %{"type": %"textlabel", "text": %"Hello", "style": %{"position": %[%10,%300]}}
     ]
   }
 }
