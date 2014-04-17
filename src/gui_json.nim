@@ -127,9 +127,7 @@ proc importChatlog* (J:PJsonNode; s:importstate): PWidget =
 
 template zz (ty; importF): expr =
   TValidator(
-    typeChecker: (proc(W:PWidget):bool= 
-      result = w of ty
-      echo "result of typeChecker(",astToStr(ty),"): ", result, " ", $w, "\L\L"),
+    typeChecker: (proc(W:PWidget):bool= w of ty),
     importer: importF
   )
 
@@ -365,11 +363,9 @@ proc applyStyles* (gui:TGuiIndex; styles: seq[PJsonNode]; ss:stylestate; validat
       
       if match_funcs.len > 0:
         gui.root.eachWidget do (W:PWidget):
-          echo "  Checking ", w, " (", match_funcs.len, " match funcs)"
           for f in match_funcs:
             if not f(w):
               return
-          echo " ! Updating style for ", w, " to ", style
           w.update w.style, style, ss
     else:
       echo "what is this ", matcher

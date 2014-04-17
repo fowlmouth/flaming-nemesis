@@ -1,6 +1,5 @@
 import 
-  gamestates, backend, chatstate, gui_json,
-  enetcon, 
+  gamestates, backend, net/chatstate, gui_json,
   signals,
   tables, strutils, basic2d,
   al/cam
@@ -129,7 +128,8 @@ lobbyGS.handleEvent = proc(GS:GameState; event:backend.PEvent): bool=
   
   when defined(useAllegro):
     if event.kind == eventTimer and event.timer.source == gs.networkTimer.eventSource:
-      gs.chat.client.update
+      when netEnabled:
+        gs.chat.client.update
 
   if GS.chat.handleEvent(event) or 
      GS.gui.dispatch(event):

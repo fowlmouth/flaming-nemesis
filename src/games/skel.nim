@@ -18,7 +18,8 @@ let gui_data = %{
     "regular": %{"file": %"Vera.ttf", "size": %14}
   },
   "style": %[
-    %[%{"type": %"textlabel"}, %{"font": %"regular", "position": %[%10,%300]}]
+    %[%{"type": %"textlabel"}, %{
+      "font": %"regular", "fontcolor": %"white", "position": %[%10,%300] }]
   ],
   "root": %{
     "type": %"container",
