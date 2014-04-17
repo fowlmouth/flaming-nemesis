@@ -1,7 +1,7 @@
 import nake, strutils
 
 const
-  babel_dependencies = ["enet","allegro5","fowltek"] # oh yes
+  babel_dependencies = ["enet","allegro5","fowltek","signals"] # oh yes
 
   binDir = "bin"
 
