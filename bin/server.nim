@@ -1,12 +1,11 @@
 import 
   enetcon, packets, pkt_tools,
-  connection_common, json,
+  connection_common, std,
+  json,
   tables, strutils, 
   fowltek/idgen
 
 
-const
-  port = 8024
 let
   defaultConfig = %{
     "name": %"SomeServer",
@@ -23,30 +22,42 @@ type
     level*: TUserLevel
     peer*: RPeer
 
-  PServer* = ref object
-    ut*: UserTable[PUser]
+  PServer* = ref object of PClient
+    running*:bool
+    port*:int16
+    userList*: TUserList
 
 proc srv * (con: PConnection): PServer =
   cast[PServer](con.data)
 
-var 
-  host: PConnection
+proc newServer* (vt:var TConnectionVT; cfg: PJsonNode): PServer =
+  let
+    port = cfg["port"].toInt
 
+  result = PServer(con: newConnection(vt), running: true)
+  result.ut.init
+  result.userList.users.newSeq 0
+  result.port = port.int16
+  result.con.data = cast[pointer](result)
+  result.con.hostServer port.int16
+proc run* (s:PServer) =
+  echo "Starting server on port ", s.port
+  while s.running:
+    s.update
 
+discard """ var 
   userList = TUserList(users: @[])
   name2user = initTable[string, int](64)
-
-proc sysMsg* (P:RPeer; msg:string) =
-  var m:TChat
-  m.user = -1
-  m.msg = msg
-  var x = initOpkt(4+len(msg))
-  x << m
-  p.send x, channel0, flagReliable
-proc sendUserlist* (P:RPeer) =
+ """
+proc sysMsg* (srv:PServer; client:int; msg:string) =
+  var x = initOpkt(sizeof(TPktID) + sizeof(uint16) + len(msg))
+  x << TChat(user: -1, msg: msg)
+  srv.con[client].send x, channel0, flagReliable
+  
+proc sendUserlist* (srv:PServer; client:int) =
   var x = initOpkt(128)
-  x << userList
-  p.send x, channel0, flagReliable
+  x << srv.userList
+  srv.con[client].send x, channel0, flagReliable
 
 import algorithm
 proc `<`* (a,b:TUser):bool = a.id < b.id
@@ -56,9 +67,25 @@ var vt = packets.defaultVT
 vt.onConnect = proc(C:PConnection; client:int) = 
   when defined(Debug):
     echo "Client ",client," connected from ", c[client].ip
-    
-  c[client].sysMsg "Welcome to a server. Waiting on a username."
+  c.srv.sysMsg client, "Welcome to a server. Waiting on a username."
 
+vt.onBadPacket = proc(C:PConnection; client:int)=
+  
+
+proc `==`* (a:TUser; b:int32):bool = a.id == b
+
+vt.onDisconnect = proc(C:PConnection; client:int) =
+  let srv = c.srv
+  if (let (has,u) = srv.findUser(client); has):
+    
+    var pkt = initOpkt(8)
+    pkt << TDisconnect(user: client.TUserID)
+    srv.con.broadcast pkt, channel0, flagReliable
+    
+    srv.ut.rm client
+    
+    let idx = srv.userList.users.find(client.int32)
+    srv.userList.users.delete idx
 
 defPkt(vt, pktChat):
   #
@@ -74,54 +101,42 @@ defPkt(vt, pktChat):
   
   con.broadcast om, channel0, flagReliable
 
-proc acceptUser (C:PConnection; client:int; name:string)=
-  name2user[name] = client
+proc acceptUser (srv:PServer; client:int; name:string)=
+  let u_u = TUser(id:client.int32, name:name)
+  srv.ut.save u_u
+  srv.userList.users.add u_u
+  srv.userList.users.sort system.cmp[TUser]
   
-  userList.users.add TUser(id:client.int32, name:name)
-  userList.users.sort system.cmp[TUser]
-  
-  c[client].sysMsg "Welcome, "& name
-  c[client].sendUserlist
+  srv.sysMsg client, "Welcome, "& name
+  srv.sendUserList client
 
-proc handleLogin* (C:PConnection; client:int; L:TLogin) =
+proc handleLogin* (srv:PServer; client:int; L:TLogin) =
   echo "New login! ", L
   
   template badLogin (msg): stmt =
-    c[client].sysMsg msg
+    srv.sysMsg client, msg
     return
   
   # see if name is good
   if L.name.isNil or L.name.len notin 2 .. 32:
-    badLogin "Name should be 2 to 32 characters"
-  if name2user.hasKey(L.name):
-    badLogin """Name "$#" is in use""" % L.name
+    badLogin "Name should be 2 to 32 characters."
+  if srv.ut.find(L.name):
+    badLogin "That name is in unavailable."
 
   # it is
-  c.acceptUser client, L.name
-  
+  srv.acceptUser client, L.name
+
 defPkt(vt,pktLogin):
   var L: TLogin
   pkt >> L
-  
-  con.handleLogin origin, L
-
-vt.onDisconnect = proc(C:PConnection; client:int) =
-  let srv = c.srv
-  
-  if client in 0 .. srv.ut.users.high and not srv.ut.users[client].name.isNil:
-    var pkt = initOpkt(8)
-    pkt << TDisconnect(user: client.TUserID)
-    c.broadcast pkt, channel0, flagReliable
-    
-    srv.ut.users[client].reset
-
-host = newConnection(vt)
-host.data = cast[pointer](PServer(ut: initUsertable()))
+  con.srv.handleLogin origin, L
 
 
-echo "Starting server on port ", port
-host.hostServer port.int16
 
-while true:
-  host.update
+when isMainModule:
+  var server = newServer(vt, defaultConfig)
+  server.run
+else:
+  proc newStandardServer* (cfg:PJsonNode): PServer =
+    newServer(vt, cfg)
 

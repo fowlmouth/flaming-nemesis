@@ -1,8 +1,8 @@
 import backend
 import_backends
 import 
-  gamestates,
-  games/lobby, chatstate,
+  gamestates, chatstate,
+  lobby,
   basic2d,
   fowltek/boundingbox ,
   math

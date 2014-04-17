@@ -1,4 +1,6 @@
-import enet, fowltek/idgen, pkt_tools
+import
+  strutils, 
+  enet, fowltek/idgen, pkt_tools
 export enet, pkt_tools
 
 type
@@ -27,11 +29,14 @@ type
   TConnectionVT* = object
     onConnect*: proc(C:PConnection; client:int) # run when a client connects
     onDisconnect*:proc(C:PConnection; client:int) # run when a client disconnects
+    onBadPacket*: proc(C:PConnection; client:int) # 
     incoming*: seq[TPktHandler]
 
 proc newPeer* (P: PPeer): RPeer =
   result = RPeer(P:P)
   p.data = cast[pointer](result)
+proc `$`* (P:RPeer): string =
+  "Peer $# from $#".format(p.id, p.ip)
 
 proc newPeer* (id:int; P:PPeer):RPeer =
   result = newPeer(p)
@@ -91,10 +96,9 @@ proc connectClient* (C:PConnection; ip:string; port:int16; timeout = 5.0;
     evt.packet.destroy
     conFail 3 
 
-  var pkt = evt.packet.to_ipkt
+  var pkt = evt.packet.init_ipkt
   var clientID: int32
   pkt >> clientID
-  #evt.packet.referenceCount = 0
   evt.packet.destroy
   
   c.peer.id = clientID
@@ -105,21 +109,26 @@ proc connectClient* (C:PConnection; ip:string; port:int16; timeout = 5.0;
 
 proc dispatch* (C:PConnection; client:int; pkt:PIpkt) =
   # 
-  while pkt.index < pkt.dataSize:
-    var
-      ty: uint16
-    pkt >> ty
-    let ID = ty.int
-    when defined(Debug):
-      echo "Dispatching packet ", ID, " ", c.vt.incoming.isNil
+  try:
+    while pkt.index < pkt.dataSize:
+      var
+        ty: uint16
+      pkt >> ty
+      let ID = ty.int
+      when defined(Debug):
+        echo "Dispatching packet ", ID, " ", c.vt.incoming.isNil
+      
+      if ID notin 0 .. high(c.vt.incoming):
+        break
+      
+      if C.vt.incoming[ID].isNil:
+        break
     
-    if ID notin 0 .. high(c.vt.incoming):
-      break
-    
-    if C.vt.incoming[ID].isNil:
-      break
-  
-    C.vt.incoming[ID](C, client, pkt)
+      C.vt.incoming[ID](C, client, pkt)
+      
+  except EShortPacket:
+    if not c.vt.onBadPacket.isNil:
+      c.vt.onBadPacket(c, client)
     
 proc `[]`* (C:PConnection; id:int): RPeer =
   C.peers[id]
@@ -149,8 +158,8 @@ proc handleConnection (C:PConnection; P:PPeer) =
   c.peers[ID] = P
   
   # get address
-  var e_addr: array[100,char]
-  discard p.p.address.getHostIP(e_addr, 100)
+  var e_addr: array[255,char]
+  discard p.p.address.getHostIP(e_addr, 255)
   p.ip = $e_addr
   
   # send welcome message (client ID)
@@ -198,7 +207,7 @@ proc update* (C:PConnection; iterations = 100) =
       var origin: int
       if c.kind == conServer:
         origin = cast[RPeer](evt.peer.data).id  
-      var pkt = evt.packet.to_ipkt
+      var pkt = evt.packet.init_ipkt
       C.dispatch origin, pkt
       #evt.packet.referenceCount = 0
       evt.packet.destroy

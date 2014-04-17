@@ -23,14 +23,12 @@ type
 
 import enetcon, enet, pkt_tools, strutils
 
-
 template load_impl*  (ty; body:stmt):stmt {.immediate.}=
   proc `>>`* (L:PIpkt; R:var ty) =
     body
 template store_impl* (ty; body:stmt):stmt {.immediate.}=
-  proc `<<`* (L:var Opkt; R:ty) =
+  proc `<<`* (L:POpkt; R:ty) =
     body
-
 
 template defPkt* (vt; id; body:stmt): stmt {.immediate.} =
   if vt.incoming.len < id.int+1:
@@ -38,9 +36,10 @@ template defPkt* (vt; id; body:stmt): stmt {.immediate.} =
   vt.incoming[id.int] = proc(con:PConnection; origin:int; pkt:PIpkt) =
     body
 
+
 type
   TChat* = object
-    user*: int32
+    user*: TUserID
     msg*: string
 store_impl(TChat):
   L << pktChat.TPktID
@@ -58,17 +57,25 @@ defPkt(defaultVT, PktChat):
   pkt >> c.msg
   echo "<$1> $2"
 
+
 type
-  TUser* = object 
-    id*: int32
+  ID_Record* [T:TInteger] = object
+    id*: T
     name*: string
+
+proc `>>`* [T] (L: PIPkt; R: var IDRecord[T]) =
+  L >> r.id
+  L >> r.name
+proc `<<`* [T] (L: POPkt; R: IDRecord[T]) = 
+  L << r.id
+  L << r.name
+
+type
+  TUser* = IDRecord[int32]
   TUserList* = object
     numUsers*: uint16
     users*: seq[TUser]
 
-load_impl(TUser):
-  L >> R.id
-  L >> R.name
 load_impl(TUserlist):  
   var userID: int32
   L >> userID
@@ -76,14 +83,11 @@ load_impl(TUserlist):
     var name: string
     L >> name
     if r.users.isNil: newSeq r.users, 0
-    R.users.add TUser(id: userID, name: name)
+    R.users.add(TUser(id: userID, name: name))
     L >> userID
   L >> r.numUsers
   assert r.numUsers.int == r.users.len
-  
-store_impl(TUser):
-  L << r.id
-  L << r.name
+
 store_impl(TUserList):
   L << pktUserList.TPktID
   var numUsers = 0
@@ -98,8 +102,8 @@ store_impl(TUserList):
   L << numUsers.uint16
   
 defPkt(defaultVT, pktUserList):
-  var x = TUserList(users: @[])
-  pkt >> x.users
+  var x: TUserList
+  pkt >> x
   echo x.users.len, " Users:"
   for i in 0 .. < x.users.len:
     echo "  ", x.users[i].name
@@ -148,20 +152,14 @@ defPkt(defaultVT, pktGame):
   pkt >> gp.gameID
   echo "Game packet not handled! id = ", gp.gameID
 
+
 type
-  TGameRecord* = tuple
-    id: int16
-    name: string
+  TGameRecord* = ID_Record[int16]
   TGamelist* = object
     games*: seq[TGameRecord]
 
-load_impl(TGamerecord):
-  L >> r.id
 load_impl(Tgamelist):
   L >> r.games
-store_impl(TGameRecord):
-  L << r.id
-  L << r.name
 store_impl(TGamelist):
   L << pktGamelist.tpktid
   L << r.games
