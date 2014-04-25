@@ -17,8 +17,8 @@ type
   TPktTy* = enum
     pktChat = 0, 
     pktUserList,
-    pktLogin,
-    pktDisconnect,
+    pktLogin, pktLoginResponse,
+    pktUserJoinLeave, pktDisconnect,
     pktGame, pktGamelist
 
 import enetcon, enet, pkt_tools, strutils
@@ -107,6 +107,37 @@ defPkt(defaultVT, pktUserList):
   echo x.users.len, " Users:"
   for i in 0 .. < x.users.len:
     echo "  ", x.users[i].name
+
+type
+ TUserJL* = object  
+  user*: TUserID
+  case joined*:bool
+  of true:
+    name*: string
+  else:
+    nil
+
+store_impl(TUserJL):
+  L << pktUserJoinLeave.TPktID
+  L << r.user
+  L << r.joined
+  if r.joined:
+    L << r.name
+load_impl(TUserJL):
+  L >> r.user
+  var b: bool
+  L >> b
+  if b:
+    r.joined = true
+    L >> r.name
+
+defPkt(defaultVT, pktUserJoinLeave):
+  var jl: TUserJL
+  pkt >> jl
+  if jl.joined:
+    echo "Player joined: ", jl.name
+  else:
+    echo "Player left: ", jl.user 
 
 type
   TLogin* = object

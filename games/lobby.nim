@@ -6,7 +6,6 @@ import
 
 import_backends
 
-var lobbyGS* = defaultGS
 type PBaseGS* = ref object of GameState
   chat*: PChatstate
   networkTimer*: PTimer
@@ -20,12 +19,23 @@ baseGS.enter = proc(gs:GameState) =
       gs.manager.window_width.float, gs.manager.window_height.float
     )
 
+  gs.networkTimer.count = 0
+  gs.networkTImer.start
+  gs.manager.queue.register gs.networkTimer.eventSource
+  
+baseGS.leave = proc(gs:GameState) =
+  let gs = gs.PBaseGS
+  gs.networkTimer.stop
+  gs.manager.queue.unregisterEventSource gs.networkTimer.eventSource
+
 baseGS.handleEvent = proc(gs:GameState; event:backend.PEvent):bool =
   result = gs.PBaseGS.chat.handleEvent(event)
   
 baseGS.draw = proc(gs:GameState; ds:drawstate) =
   gs.PBaseGS.chat.draw(ds)
 
+
+var lobbyGS* = baseGS
 type PLobbyGS* = ref object of PBaseGS
   gui: TGuiIndex
   cam: PCamera
@@ -34,22 +44,23 @@ var registeredGames: seq[tuple[name:string, gs:ptr gs_vt]] = @[]
 proc registerGame* (name:string; gs: var gs_vt) =
   registeredGames.add((name, gs.addr))
 
+template registerStandalone* (name:string; gs:var gs_vt): stmt {.immediate.} =
+  registerGame(name,gs)
+  when isMainModule:
+    let m = newGSM(800,600,name)
+    m.push gs
+    m.run
+
 lobbyGS.enter = proc(GS:GameState) =
   baseGS.enter(GS)
   
   let GS = GS.PLobbyGS
-  
-  gs.networkTimer.count = 0
-  gs.networkTImer.start
-  gs.manager.queue.register gs.networkTimer.eventSource
   
   gs.cam = newCamera(GS.manager.display)
   gs.cam.center = point2d(gs.manager.window_width/2, gs.manager.window_height/2)
 
 lobbyGS.leave = proc(GS:GameState) =
   let GS = GS.PLobbyGS
-  
-  gs.manager.queue.unregisterEventSource gs.networkTimer.eventSource
 
 proc `$`* (some:GSM): string =
   if some.isNil: "nil.GSM" else: "some GSM"

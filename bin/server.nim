@@ -22,33 +22,39 @@ type
     level*: TUserLevel
     peer*: RPeer
 
+  TComChannel* = object
+    name*: string
+    users*: seq[int]
+  
   PServer* = ref object of PClient
-    running*:bool
     port*:int16
     userList*: TUserList
+    comChannels: seq[TComChannel]
 
 proc srv * (con: PConnection): PServer =
   cast[PServer](con.data)
+
+proc initComChan (name:string): TComChannel =
+  TComChannel(users: @[], name: name)
 
 proc newServer* (vt:var TConnectionVT; cfg: PJsonNode): PServer =
   let
     port = cfg["port"].toInt
 
   result = PServer(con: newConnection(vt), running: true)
+  result.name = cfg["name"].str
+  result.comChannels = @[ initComChan("pubchat") ]
   result.ut.init
   result.userList.users.newSeq 0
   result.port = port.int16
   result.con.data = cast[pointer](result)
   result.con.hostServer port.int16
+
 proc run* (s:PServer) =
   echo "Starting server on port ", s.port
   while s.running:
     s.update
 
-discard """ var 
-  userList = TUserList(users: @[])
-  name2user = initTable[string, int](64)
- """
 proc sysMsg* (srv:PServer; client:int; msg:string) =
   var x = initOpkt(sizeof(TPktID) + sizeof(uint16) + len(msg))
   x << TChat(user: -1, msg: msg)

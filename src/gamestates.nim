@@ -127,33 +127,6 @@ proc newGSM* (w,h:int; title:string): GSM =
   
   result.states.newSeq 0
 
-discard """ template run_main_arg* (argument; argName; body:stmt): stmt =
-  discard al.run_main(0, cast[cstringarray](argument)) do (argc:cint,argv:cstringarray)->cint{.cdecl.}:
-    let argName{.inject.} = cast[type(argument)](argv)
-    body 
-     """
-discard """ proc run_main_arg [T:ref|ptr] (arg:T; func:proc(arg:T){.nimcall.}) =
-  type TBlah = tuple[func: proc(arg:T){.nimcall.}, arg: T]
-  var arr: TBlah = (func, arg)
-  discard al.run_main(0, cast[cstringarray](addr arr)) do (argc:cint;argv:cstringarray)->cint{.cdecl.}:
-    let (func,arg) = cast[ptr TBlah](argv)[]
-    func arg
- """
-
-
-proc al_main2* [T] (arg:T; func:proc(arg:T){.nimcall.}) =
-    #block:
-    type TBlah = tuple[func: type(func), arg: T]
-    var hax : TBlah = (func,arg)
-    discard al.run_main(0, cast[cstringarray](hax.addr)) do (argc:cint;argv:cstringarray)->cint{.cdecl.}:
-      let hax = cast[ptr TBlah](argv)
-      hax.func hax.arg
-
-template al_main2* (body:stmt):stmt =
-  discard run_main(0, nil, proc(argc:cint; argv:cstringarray):cint{.cdecl.} =
-    body
-  )
-
 
 proc run* (M: GSM) =
   
@@ -177,8 +150,7 @@ proc run* (M: GSM) =
 
   elif defined(useAllegro):
     
-    #discard al.run_main(0, cast[cstringarray](m)) do (argc:cint, argv:cstringarray)->cint{.cdecl.}:
-    #  let man = cast[GSM](argv)
+    # vvv does this work on osx??
     al_main(m) do (man:GSM):
       var
         last = getTime()
@@ -196,17 +168,17 @@ proc run* (M: GSM) =
           continue
         
         if evt.kind == eventTimer and evt.timer.source == drawTimer.eventSource:
-            let cur = al.getTime()
-            let dt = last - cur
-            last = cur
-            
-            man.topGS.vt.update man.topGS, dt
-            
-            set_target_backbuffer man.display
-            clearToColor mapRGB(0,0,0)
-            var ds = drawState(d:man.display)
-            man.topGS.vt.draw(man.topGS, ds)
-            flipDisplay()
+          let cur = al.getTime()
+          let dt = last - cur
+          last = cur
+          
+          man.topGS.vt.update man.topGS, dt
+          
+          set_target_backbuffer man.display
+          clearToColor mapRGB(0,0,0)
+          var ds = drawState(d:man.display)
+          man.topGS.vt.draw(man.topGS, ds)
+          flipDisplay()
 
       drawTimer.stop
     

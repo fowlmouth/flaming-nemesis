@@ -42,6 +42,7 @@ type
     name*: string
     con*: PConnection
     ut*: usertable[TUser]
+    running*: bool
 
 proc connect* (client:PClient; host:string; port:int; timeout = 5.0) =
   client.con.connectClient host, port.int16, timeout
