@@ -1,6 +1,6 @@
 
 import fowltek/idgen, fowltek/entitty, signals
-export idgen, entitty
+export idgen, entitty, signals
 
 type
  
@@ -10,6 +10,11 @@ type
     onEntAdded* : EM_CB
     onEntDestroyed* : EM_CB
   #   
+  PSystem* = ref TSystem
+  TSystem* = object of TObject
+    slots*: seq[PSignalBase]
+    added_to_em*,removed_from_em* : proc(sys:PSystem; em:EntityManager) 
+    
   EntityManager* = ref TEntityManager
   TEntityManager* = object
     entities: seq[TEntity]
@@ -19,13 +24,9 @@ type
     vt*: EM_VT
     systems*: seq[PSystem] 
     
-    entityAdded*,entityDestroyed*: PSignal[PEntity]
+    entityAdded*,entityDestroyed*: PSignal[ptr TEntity]
     
-    
-  PSystem* = ref TSystem
-  TSystem* = object of TObject
-    slots*: seq[PSignalBase]
-    added_to_em*,removed_from_em* : proc(sys:PSystem; em:EntityManager)  
+ 
 
 type PUpdateSystem* = ref object of PSystem
   active*: seq[int]
@@ -33,10 +34,10 @@ proc updateSystem* : PUpdateSystem =
   result = PUpdateSystem(active: @[])
   result.added_to_em = proc(sys:PSystem; em:EntityManager) =
     # connect to the em's signals
-    em.entityAdded.connect(sys) do (sys:PSystem; entity:int):
-      sys.PUpdateSystem.active.add entity
-    em.entityDestroyed.connect(sys) do (sys:PSystem; entity:int):
-      if(let idx = sys.PUpdateSystem.active.find(entity); idx != -1):
+    em.entityAdded.connect(sys) do (sys:PSystem; entity:ptr TEntity):
+      sys.PUpdateSystem.active.add entity.id
+    em.entityDestroyed.connect(sys) do (sys:PSystem; entity:ptr TEntity):
+      if(let idx = sys.PUpdateSystem.active.find(entity.id); idx != -1):
         sys.PUpdateSystem.active.del idx
   result.removed_from_em = proc(sys:PSystem; em:EntityManager) =
     em.entityAdded.disconnect sys
@@ -53,12 +54,7 @@ proc init* (em: EntityManager; initialSize = 1024) =
   em.active.newseq 0
   em.systems.newSeq 0
 proc init* (sys: PSystem) =
-  sys.entAdded = proc(sys:PSystem;em:EntityManager;ent:int) = 
-    #
-  sys.entDestroyed = proc(sys:PSystem;em:EntityManager;ent:int) = 
-    #
-  sys.update = proc(sys:PSystem;em:EntityManager; dt:float)= 
-    #
+  #
 
 proc newEM* (initialSize = 1024): EntityManager = 
   result = EntityManager()
@@ -71,22 +67,22 @@ iterator activeEntities* (EM:EntityManager): PEntity =
 
 proc entityBeingAdded (em:entitymanager; ent:int){.inline.} =
 
-  em.entityAdded.emit em[ent]
+  em.entityAdded.emit em[ent].addr
 
   if not em.vt.onEntAdded.isNil:
     em.vt.onEntAdded( em, ent )
 
 proc entityBeingDestroyed (em:entitymanager; ent:int){.inline.} =
 
-  for sys in em.systems:
-    sys.entDestroyed sys, em, ent
+  em.entityDestroyed.emit em[ent].addr
      
   if not em.vt.onEntDestroyed.isNil:
     em.vt.onEntDestroyed( em, ent )
 
 proc add* (EM: EntityManager; E: TEntity): int =
   result = em.idgen.get
-  em.entities.ensureLen result+1
+  
+  #ensurelen em.entities, result+1
   em.entities[result] = E
   em[result].id = result
   em.active.add result

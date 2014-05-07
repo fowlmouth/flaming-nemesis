@@ -47,11 +47,14 @@ msgImpl(Body, load) do (J: PJsonNode):
     let j = j["Body"]
     
     if j.hasKey("mass"):
-      let mass = j["mass"].toFloat
-      if entity[body].b.isNIL:
-        entity[body].b = newBody(mass, 1.0)
+      if j["mass"].kind == jString and j["mass"].str == "infinity":
+        entity[body].b = newStatic()
       else:
-        entity[body].b.setMass mass
+        let mass = j["mass"].toFloat
+        if entity[body].b.isNIL:
+          entity[body].b = newBody(mass, 1.0)
+        else:
+          entity[body].b.setMass mass
 
     if j.hasKey("shape"):
       if not entity[body].s.isnil:

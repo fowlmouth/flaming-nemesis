@@ -5,7 +5,8 @@ static:
 import 
   backend, lobby, chatstate,
   gamestates, gui_json,
-  json, tables,
+  physfs, 
+  json, tables, os,
   fowltek/maybe_t
 import_backends
 
@@ -18,6 +19,7 @@ type
   pgs = ref object of pbasegs
     em*: EntityManager
     gui: TGuiIndex
+    al_state: al.TState
 
 let
   data = """
@@ -127,18 +129,11 @@ var
   
   gameData = Nothing[entCache]()
 
-var dom* = newDomain()  
-# uncomment to register it in the lobby's game list thing
-registerGame "wormhole", gs
+  dom* = newDomain()  
 
 gs.init = proc(gs:var gamestate; m:gsm) =
   var res: pgs
   new res
-  
-  if not gameData.has:
-    gameData = just(dom.loadData(data.parseJson))
-  
-  res.em = gameData.val.loadScene gameData.val.j["scenes"]["intro"]
   
   discard """ let j = %{
     "font":  %{
@@ -154,8 +149,42 @@ gs.init = proc(gs:var gamestate; m:gsm) =
   } """
   #res.gui = j.importGui(m.window_width.float, m.window_height.float, defaultController)
   
-  
   gs = res
+
+let
+  assets_file = (getAppDir()/".."/"assets"/"roids20140420.zip").expandFilename
+  
+gs.enter = proc(gs:gamestate) = 
+  basegs.enter(gs)
+  let GS = GS.PGS
+  al.store_state(gs.al_state.addr, State_NewFileInterface)
+  discard physfs.init()
+  
+  let x = physfs.supportedArchiveTypes()
+  for it in x:
+    echo "supported [", it.extension, "] ", it.description
+  
+  if physfs.mount(assets_file, nil, 0) != 1:
+    raise newException(EIO, "Failed to mount "& assets_file)
+  
+  discard """ for f in physfs.enumerateFiles("/"):
+    echo f
+  quit 0 """
+  
+  al.set_physfs_file_interface()
+  
+  
+  if not gameData.has:
+    gameData = just(dom.loadData(data.parseJson))
+  
+  gs.em = gameData.val.loadScene gameData.val.j["scenes"]["intro"]
+  
+
+gs.leave = proc(gs:gamestate) =
+  basegs.leave(gs)
+  
+  discard physfs.remove_from_search_path 
+  al.restore_state gs.pgs.al_state.addr
 
 gs.update = proc(gs:gamestate; dt:float) =
   for ent in gs.pgs.em.activeEntities:
@@ -172,7 +201,8 @@ gs.draw = proc(gs:gamestate; ds:drawstate) =
 
 
 gs.handleEvent = proc(gs:gamestate; evt:backend.PEvent): bool =
-  if gs.pgs.gui.dispatch(evt) or baseGS.handleEvent( gs, evt ): 
+  #if gs.pgs.gui.dispatch(evt) or 
+  if baseGS.handleEvent( gs, evt ): 
     return true
   
   quit_event_check(evt):

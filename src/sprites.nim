@@ -96,7 +96,7 @@ proc loadSprite* (db: SpriteSheetCache; file:string): SpriteSheet {.
     return
   
   when defined(useAllegro):
-    let bmp = load_bitmap(db.assetsDir / file)
+    let bmp = load_bitmap(file)
     if bmp.isNil:
       raise newException(EIO, "Failed to load image "& file)
     

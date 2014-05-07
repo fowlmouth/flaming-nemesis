@@ -19,6 +19,8 @@ baseGS.enter = proc(gs:GameState) =
       gs.manager.window_width.float, gs.manager.window_height.float
     )
 
+  if gs.networkTimer.isNil:
+    gs.networkTimer = createTimer(1/60)
   gs.networkTimer.count = 0
   gs.networkTImer.start
   gs.manager.queue.register gs.networkTimer.eventSource

@@ -6,6 +6,7 @@ import chipmunk as cp except TBB
 type
   CpPhysicsSystem* = ref object of PSystem
     space*: PSpace
+    update: proc(sys:PSystem; em:EntityManager; dt:float)
 
 proc findPhysicsSystem* (haystack: seq[PSystem]): CpPhysicsSystem =
   for ndl in haystack:
@@ -14,11 +15,21 @@ proc findPhysicsSystem* (haystack: seq[PSystem]): CpPhysicsSystem =
 
 proc newPhysicsSystem* : CpPhysicsSystem = 
   new(result) do (x: CPPhysicsSystem):
-    destroy x.space
+    if not x.space.isNil:
+      free x.space
+      
+  result.added_to_em = proc(sys:PSystem; em:EntityManager) =
+    # connect to the em's signals
+    em.entityAdded.connect(sys) do (sys:PSystem; entity:ptr TEntity):
+      entity[].addToSpace sys.CpPhysicsSystem.space
+    em.entityDestroyed.connect(sys) do (sys:PSystem; entity:ptr TEntity):
+      entity[].removeFromSpace sys.CpPhysicsSystem.space
+
+  result.removed_from_em = proc(sys:PSystem; em:EntityManager) =
+    em.entityAdded.disconnect sys
+    em.entityDestroyed.disconnect sys
+
   result.space = newSpace()
-  result.entAdded = proc(sys:PSystem; em:EntityManager; ent:int) =
-    em[ent].addToSpace sys.cpPhysicsSystem.space
-  result.entDestroyed = proc(sys:PSystem; em:EntityManager; ent:int) =
-    em[ent].removeFromSpace sys.cpPhysicsSystem.space
+  
   result.update = proc(sys:PSystem; em:EntityManager; dt:float) =
     sys.cpPhysicsSystem.space.step dt

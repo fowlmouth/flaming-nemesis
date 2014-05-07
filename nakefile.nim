@@ -46,7 +46,7 @@ proc imports (dir:string; modules:varargs[string]): string =
 template gameImports : expr = imports(gamesDir, allGames())
 
 task "build-launcher","build the launcher":
-  dire_shell "nimrod c", guiDefines, standardDefines, gameImports, launcherExe
+  dire_shell "nimrod c", "--parallelbuild:1", guiDefines, standardDefines, gameImports, launcherExe
 
 task "build-server","build the server":
   dire_shell "nimrod c", guiDefines, standardDefines, gameImports, serverExe
@@ -188,6 +188,8 @@ task "assets", "download the latest assets n such":
         if md5_file(file) != md5:
           failed.add file &": Invalid checksum"
           removeFile file
+        else:
+          echo file, " is good."
 
       except:
         failed.add file & ": "& getCurrentExceptionMsg()

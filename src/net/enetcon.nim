@@ -44,9 +44,9 @@ proc newPeer* (id:int; P:PPeer):RPeer =
 
 proc newConnection* (vt: var TConnectionVT): PConnection =
   new(result) do (x:PConnection):
-    # 
+
     if not x.host.isNil:
-      #
+      discard
   result.vt = vt.addr
 
 proc hostServer* (C:PConnection;
@@ -82,7 +82,7 @@ proc connectClient* (C:PConnection; ip:string; port:int16; timeout = 5.0;
   if L:
     conFail 1
   
-  var evt: TEvent
+  var evt{.noInit.}: enet.TEvent
   L = c.host.hostService(evt, cuint(timeout * 1000)) > 0 and 
       evt.kind == evtConnect
   if not L:
@@ -164,7 +164,7 @@ proc handleConnection (C:PConnection; P:PPeer) =
   
   # send welcome message (client ID)
   var pkt = initOpkt(2)
-  pkt << p.id
+  pkt << p.id.int32
   p.send pkt, 0.cuchar, flagReliable
   
   # run onConnect callbac
@@ -175,7 +175,7 @@ proc update* (C:PConnection; iterations = 100) =
   if c.isNil: return
 
   var 
-    evt: TEvent
+    evt: enet.TEvent
   for i in 1 .. iterations:
     if c.host.hostService(evt, 1) < 1:
       break
@@ -209,7 +209,6 @@ proc update* (C:PConnection; iterations = 100) =
         origin = cast[RPeer](evt.peer.data).id  
       var pkt = evt.packet.init_ipkt
       C.dispatch origin, pkt
-      #evt.packet.referenceCount = 0
       evt.packet.destroy
 
     else:
